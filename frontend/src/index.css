@@ -1,0 +1,466 @@
+/* =====================================================
+   SWERTRES — DESIGN SYSTEM v2
+   ===================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  --bg-deep:   #060b1f;
+  --bg-dark:   #0d1435;
+  --primary:   #1e40af;
+  --primary-l: #2563eb;
+  --gold:      #fbbf24;
+  --gold-d:    #d97706;
+  --gold-l:    #fde68a;
+  --green:     #10b981;
+  --green-d:   #059669;
+  --red:       #ef4444;
+  --text:      #1e293b;
+  --muted:     #64748b;
+  --border:    #e2e8f0;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 24px rgba(0,0,0,0.14);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.22);
+  --r-sm:  8px;
+  --r:    14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+}
+
+/* ── Base reset ────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+html, body { overflow-x: hidden; }
+
+body {
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  background: linear-gradient(160deg, var(--bg-deep) 0%, #0b1230 50%, #0e1942 100%);
+  min-height: 100vh;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { min-height: 100vh; }
+
+/* Prevent iOS zoom on input focus */
+input, select, textarea {
+  font-size: max(16px, 1em);
+  font-family: inherit;
+}
+
+/* ── Horizontal-scroll wrapper ─────── */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Shared card ───────────────────── */
+.sw-card {
+  background: #fff;
+  border-radius: var(--r-lg);
+  padding: 20px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Lottery ball ──────────────────── */
+.lotto-ball {
+  width: 46px;
+  height: 46px;
+  background: linear-gradient(145deg, #2563eb 0%, #1e40af 100%);
+  color: #fff;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 20px;
+  box-shadow: 0 4px 14px rgba(30,64,175,0.45), inset 0 1px 3px rgba(255,255,255,0.35);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
+.lotto-ball-gold {
+  background: linear-gradient(145deg, #fbbf24 0%, #d97706 100%);
+  box-shadow: 0 4px 14px rgba(251,191,36,0.45), inset 0 1px 3px rgba(255,255,255,0.35);
+}
+
+/* ── Animations ─────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.4); }
+  50%       { box-shadow: 0 0 0 10px rgba(251,191,36,0); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-5px); }
+}
+.animate-fadeInUp { animation: fadeInUp 0.35s ease forwards; }
+.animate-float    { animation: float 3s ease-in-out infinite; }
+.animate-pulse-glow { animation: pulse-glow 2s ease infinite; }
+
+/* ── Status badges ───────────────────── */
+.bet-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.bet-badge-won     { background: #dcfce7; color: #166534; }
+.bet-badge-lost    { background: #fee2e2; color: #991b1b; }
+.bet-badge-pending { background: #fef3c7; color: #92400e; }
+
+/* ── Digit lottery input ─────────────── */
+.digit-input {
+  width: 72px;
+  height: 72px;
+  border: 3px solid #e2e8f0;
+  border-radius: 50% !important;
+  font-size: 30px !important;
+  font-weight: 900 !important;
+  text-align: center;
+  color: #1e40af;
+  background: #f8fafc;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  font-family: 'Poppins', sans-serif;
+}
+.digit-input:focus {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 4px rgba(37,99,235,0.15);
+}
+.digit-input:not(:placeholder-shown) {
+  background: linear-gradient(145deg, #2563eb, #1e40af);
+  color: #fff;
+  border-color: #1e40af;
+  box-shadow: 0 4px 14px rgba(30,64,175,0.4), inset 0 1px 3px rgba(255,255,255,0.25);
+}
+.digit-input::-webkit-inner-spin-button,
+.digit-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+/* ── Navbar ─────────────────────────── */
+.nav-hamburger {
+  display: none;
+  background: transparent;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--gold);
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.nav-hamburger:active { background: rgba(251,191,36,0.12); }
+
+.nav-desktop-links {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.nav-mobile-menu {
+  position: fixed;
+  top: 64px;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, #0d1435 0%, #060b1f 100%);
+  padding: 10px 16px 20px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  z-index: 98;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 2px solid rgba(251,191,36,0.18);
+}
+
+.nav-mobile-menu a,
+.nav-mobile-link-btn {
+  display: block;
+  width: 100%;
+  padding: 12px 16px !important;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  box-sizing: border-box;
+  transition: background 0.15s;
+}
+
+.nav-mobile-link-btn {
+  background: transparent;
+  border: 1px solid rgba(251,191,36,0.3) !important;
+  color: var(--gold) !important;
+  cursor: pointer;
+  font-family: inherit;
+  margin: 0;
+}
+
+/* ── Global input / select resets ──── */
+input[type="number"],
+input[type="text"],
+input[type="tel"],
+input[type="password"],
+input[type="date"],
+select {
+  font-family: 'Poppins', sans-serif;
+}
+
+/* ── Responsive breakpoints ─────────── */
+@media (max-width: 540px) {
+  .nav-hamburger   { display: block; }
+  .nav-desktop-links { display: none; }
+
+  .app-container { padding: 10px 10px !important; }
+
+  .admin-header-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .admin-header-row input[type="date"],
+  .admin-header-row select { width: 100% !important; }
+  .admin-header-row > div { width: 100%; }
+  .admin-header-row button { width: 100%; }
+
+  .admin-tab-bar button {
+    flex: 1;
+    padding: 8px 6px !important;
+    font-size: 13px !important;
+  }
+
+  .digit-input {
+    width: 60px !important;
+    height: 60px !important;
+    font-size: 26px !important;
+  }
+
+  .results-search-row { flex-direction: column; }
+  .results-search-row input,
+  .results-search-row button { width: 100%; }
+
+  .payment-result-card {
+    margin-top: 16px !important;
+    padding: 28px 18px !important;
+  }
+
+  .lotto-ball {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 360px) {
+  .digit-input {
+    width: 52px !important;
+    height: 52px !important;
+    font-size: 22px !important;
+  }
+}
+
+/* =====================================================
+   DARK GLASS CASINO EDITION — v3
+   ===================================================== */
+
+:root {
+  --neon-cyan:   #38d9f5;
+  --neon-purple: #a78bfa;
+}
+
+/* ── Dark glass card ─────────────────────────────── */
+.dark-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 20px;
+  padding: 20px;
+  margin-bottom: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ── LIVE pulse dot ─────────────────────────────── */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px 0px #4ade80; }
+  50%       { opacity: 0.55; box-shadow: 0 0 10px 3px rgba(74,222,128,0.45); }
+}
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #4ade80;
+  border-radius: 50%;
+  animation: live-pulse 1.4s ease infinite;
+  flex-shrink: 0;
+}
+
+/* ── Countdown boxes ────────────────────────────── */
+.countdown-box {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 52px;
+  text-align: center;
+}
+.countdown-num {
+  font-size: 26px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.countdown-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.38);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 3px;
+}
+
+/* ── Shimmer/neon CTA button ────────────────────── */
+@keyframes shimmer-btn {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.neon-cta-btn {
+  background: linear-gradient(90deg,
+    #d97706 0%, #fbbf24 30%, #fde68a 50%, #fbbf24 70%, #d97706 100%);
+  background-size: 300% auto;
+  animation: shimmer-btn 3s linear infinite;
+  color: #1a0a00 !important;
+  font-weight: 900;
+  border: none;
+  cursor: pointer;
+  font-family: 'Poppins', sans-serif;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 24px rgba(251,191,36,0.45);
+  transition: transform 0.15s, box-shadow 0.15s;
+  text-decoration: none;
+}
+.neon-cta-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 36px rgba(251,191,36,0.65);
+}
+.neon-cta-btn:active { transform: translateY(0); }
+
+/* ── Gold glowing prize text ────────────────────── */
+@keyframes prize-glow {
+  0%, 100% { text-shadow: 0 0 8px rgba(251,191,36,0.5), 0 0 28px rgba(251,191,36,0.12); }
+  50%       { text-shadow: 0 0 18px rgba(251,191,36,1),  0 0 50px rgba(251,191,36,0.4); }
+}
+.prize-glow-text {
+  color: #fbbf24;
+  animation: prize-glow 2.5s ease infinite;
+}
+
+/* ── Dark digit input (PlaceBet redesign) ───────── */
+.digit-input-dark {
+  width: 80px;
+  height: 80px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-radius: 50% !important;
+  font-size: 32px !important;
+  font-weight: 900 !important;
+  text-align: center;
+  color: rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.05);
+  outline: none;
+  transition: all 0.2s;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  font-family: 'Poppins', sans-serif;
+  caret-color: #fbbf24;
+}
+.digit-input-dark::placeholder { color: rgba(255,255,255,0.18); }
+.digit-input-dark:focus {
+  border-color: #38d9f5;
+  background: rgba(56,217,245,0.07);
+  box-shadow: 0 0 0 4px rgba(56,217,245,0.12), 0 0 14px rgba(56,217,245,0.2);
+  color: #fff;
+}
+.digit-input-dark.is-filled {
+  background: rgba(251,191,36,0.1);
+  border-color: #fbbf24;
+  color: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251,191,36,0.15), 0 0 18px rgba(251,191,36,0.28);
+}
+.digit-input-dark::-webkit-inner-spin-button,
+.digit-input-dark::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+/* ── Bet cards (colored by status) ─────────────── */
+.bet-card-won {
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.25);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.bet-card-lost {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.16);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.bet-card-pending {
+  background: rgba(251,191,36,0.05);
+  border: 1px solid rgba(251,191,36,0.18);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+/* ── Large glowing lotto ball (Results) ─────────── */
+.lotto-ball-lg {
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(145deg, #38d9f5 0%, #0ea5e9 60%, #0284c7 100%);
+  color: #fff;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 22px;
+  box-shadow: 0 0 18px rgba(56,217,245,0.5), 0 4px 10px rgba(0,0,0,0.35),
+              inset 0 1px 4px rgba(255,255,255,0.4);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  flex-shrink: 0;
+}
+
+/* ── Mobile overrides for new classes ────────────── */
+@media (max-width: 540px) {
+  .digit-input-dark {
+    width: 68px !important;
+    height: 68px !important;
+    font-size: 26px !important;
+  }
+  .countdown-num { font-size: 20px; }
+  .countdown-box { min-width: 40px; padding: 6px 7px; }
+  .lotto-ball-lg { width: 44px; height: 44px; font-size: 17px; }
+}
+
+@media (max-width: 360px) {
+  .digit-input-dark {
+    width: 58px !important;
+    height: 58px !important;
+    font-size: 22px !important;
+  }
+}

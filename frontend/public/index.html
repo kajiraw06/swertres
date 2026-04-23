@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+    <meta name="theme-color" content="#1e40af" />
+    <title>Swertres Online — 3D Lotto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Inter', sans-serif; background: #f1f5f9; color: #1e293b; }
+    </style>
+    <script>
+      /* Polyfill Performance API methods missing in some WebViews */
+      if (window.performance) {
+        if (typeof window.performance.clearMarks !== 'function') {
+          window.performance.clearMarks = function() {};
+        }
+        if (typeof window.performance.clearMeasures !== 'function') {
+          window.performance.clearMeasures = function() {};
+        }
+        if (typeof window.performance.mark !== 'function') {
+          window.performance.mark = function() {};
+        }
+        if (typeof window.performance.measure !== 'function') {
+          window.performance.measure = function() {};
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
