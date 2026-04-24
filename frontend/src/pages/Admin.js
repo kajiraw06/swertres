@@ -445,9 +445,9 @@ export default function Admin() {
             <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>No numbers match "{numSearch}"</div>
           ) : (
             <div className="scroll-x" style={{ borderRadius: 10 }}>
-            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 800 }}>
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 1020 }}>
               {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 200px 90px 80px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
                 <span>NUMBER</span>
                 <span style={{ textAlign: 'right' }}>STRAIGHT</span>
                 <span style={{ textAlign: 'right' }}>RAMBOLITO</span>
@@ -473,7 +473,7 @@ export default function Admin() {
                     {/* Main row */}
                     <div
                       style={{
-                        display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px',
+                        display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 200px 90px 80px 28px',
                         padding: '0 14px', gap: 8, alignItems: 'center', minHeight: 48,
                         background: isOpen ? riskBg(p) : idx % 2 === 0 ? '#fff' : '#fafbff',
                         borderTop: '1px solid #e2e8f0',
@@ -500,7 +500,7 @@ export default function Admin() {
                           placeholder="Limit"
                           value={inputVal}
                           onChange={e => setLimitInputs(prev => ({ ...prev, [lmKey]: e.target.value }))}
-                          style={{ width: 72, height: 28, padding: '0 6px', borderRadius: 6, border: `1.5px solid ${existingLimit ? '#f59e0b' : '#e2e8f0'}`, fontSize: 12, fontFamily: 'inherit', background: existingLimit ? '#fffbeb' : '#fff', boxSizing: 'border-box' }}
+                          style={{ width: 90, height: 28, padding: '0 6px', borderRadius: 6, border: `1.5px solid ${existingLimit ? '#f59e0b' : '#e2e8f0'}`, fontSize: 12, fontFamily: 'inherit', background: existingLimit ? '#fffbeb' : '#fff', boxSizing: 'border-box' }}
                         />
                         <button
                           onClick={() => saveInlineLimit(row.numbers, activeTab)}
@@ -646,7 +646,7 @@ export default function Admin() {
               })}
 
               {/* Grand total row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 200px 90px 80px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
                 <span style={{ fontSize: 13 }}>TOTAL ({Object.keys(grouped).length})</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.straightAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.ramboAmt, 0).toFixed(2)}</span>
