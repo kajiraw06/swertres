@@ -457,61 +457,61 @@ export default function Admin() {
                     <div
                       style={{
                         display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px',
-                        padding: '8px 14px', gap: 8, alignItems: 'center',
+                        padding: '0 14px', gap: 8, alignItems: 'center', minHeight: 48,
                         background: isOpen ? riskBg(p) : idx % 2 === 0 ? '#fff' : '#fafbff',
                         borderTop: '1px solid #e2e8f0',
                         borderLeft: `4px solid ${riskColor(p)}`,
                       }}>
-                      <span style={{ cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}><Num numbers={row.numbers} /></span>
-                      <span style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
+                      <div style={{ cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}><Num numbers={row.numbers} /></div>
+                      <div style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
                         {row.straightAmt > 0
                           ? <><span style={{ fontWeight: 700 }}>₱{row.straightAmt.toFixed(2)}</span><br /><span style={{ fontSize: 11, color: '#64748b' }}>{row.bettors.filter(b => b.bet_type === 'straight').length} bet{row.bettors.filter(b => b.bet_type === 'straight').length !== 1 ? 's' : ''}</span></>
                           : <span style={{ color: '#cbd5e1' }}>—</span>}
-                      </span>
-                      <span style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
+                      </div>
+                      <div style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
                         {row.ramboAmt > 0
                           ? <><span style={{ fontWeight: 700 }}>₱{row.ramboAmt.toFixed(2)}</span><br /><span style={{ fontSize: 11, color: '#64748b' }}>{row.bettors.filter(b => b.bet_type !== 'straight').length} bet{row.bettors.filter(b => b.bet_type !== 'straight').length !== 1 ? 's' : ''}</span></>
                           : <span style={{ color: '#cbd5e1' }}>—</span>}
-                      </span>
-                      <span style={{ textAlign: 'right', fontWeight: 900, fontSize: 15, color: '#16a34a', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{row.total.toFixed(2)}</span>
-                      <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: riskColor(p), cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{p.toLocaleString()}</span>
+                      </div>
+                      <div style={{ textAlign: 'right', fontWeight: 900, fontSize: 15, color: '#16a34a', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{row.total.toFixed(2)}</div>
+                      <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: riskColor(p), cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{p.toLocaleString()}</div>
 
                       {/* LIMIT cell */}
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }} onClick={e => e.stopPropagation()}>
                         <input
                           type="number" min="0" step="10"
                           placeholder="Limit"
                           value={inputVal}
                           onChange={e => setLimitInputs(prev => ({ ...prev, [lmKey]: e.target.value }))}
-                          style={{ width: 72, padding: '3px 6px', borderRadius: 6, border: `1.5px solid ${existingLimit ? '#f59e0b' : '#e2e8f0'}`, fontSize: 12, fontFamily: 'inherit', background: existingLimit ? '#fffbeb' : '#fff' }}
+                          style={{ width: 72, height: 28, padding: '0 6px', borderRadius: 6, border: `1.5px solid ${existingLimit ? '#f59e0b' : '#e2e8f0'}`, fontSize: 12, fontFamily: 'inherit', background: existingLimit ? '#fffbeb' : '#fff', boxSizing: 'border-box' }}
                         />
                         <button
                           onClick={() => saveInlineLimit(row.numbers, activeTab)}
                           disabled={isSaving}
                           title="Save limit"
-                          style={{ padding: '3px 7px', borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>
+                          style={{ height: 28, padding: '0 8px', borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
                           {isSaving ? '…' : existingLimit ? '✓' : '+'}
                         </button>
                         {existingLimit && (
                           <button
                             onClick={() => removeInlineLimit(row.numbers, activeTab)}
                             title="Remove limit"
-                            style={{ padding: '3px 6px', borderRadius: 6, border: 'none', background: '#fef2f2', color: '#dc2626', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            style={{ height: 28, padding: '0 7px', borderRadius: 6, border: 'none', background: '#fef2f2', color: '#dc2626', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
                             ✕
                           </button>
                         )}
-                      </span>
+                      </div>
 
                       {/* EXCESS cell */}
-                      <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 12 }}>
+                      <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 12 }}>
                         {excess === null
                           ? <span style={{ color: '#cbd5e1' }}>—</span>
                           : excess > 0
                             ? <span style={{ color: '#dc2626' }}>+₱{excess.toFixed(2)}</span>
                             : <span style={{ color: '#16a34a' }}>OK</span>}
-                      </span>
+                      </div>
 
-                      <span style={{ textAlign: 'center', fontSize: 14, color: '#94a3b8', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>{isOpen ? '▲' : '▼'}</span>
+                      <div style={{ textAlign: 'center', fontSize: 14, color: '#94a3b8', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>{isOpen ? '▲' : '▼'}</div>
                     </div>
 
                     {/* Expanded bettors + past winners */}
