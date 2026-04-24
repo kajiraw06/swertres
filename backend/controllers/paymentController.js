@@ -142,17 +142,8 @@ exports.createQrphCheckout = async (req, res) => {
       .from('users').select('id, name, phone, email, balance').eq('id', req.user.id).single();
     if (!user) return res.status(404).json({ message: 'User not found.' });
 
-    const { data: txn, error: txnErr } = await supabase.from('transactions').insert({
-      user_id:        user.id,
-      type:           'deposit',
-      amount:         depositAmount,
-      balance_before: parseFloat(user.balance),
-      balance_after:  parseFloat(user.balance),
-      note:           `QRPh deposit ₱${depositAmount} — awaiting scan`,
-    }).select().single();
-    if (txnErr) throw txnErr;
-
     // Step 1: Create Payment Intent
+    // NOTE: No transaction/payment DB record until webhook confirms payment
     const piRes = await axios.post(`${PM_BASE}/payment_intents`, {
       data: {
         attributes: {
@@ -196,13 +187,12 @@ exports.createQrphCheckout = async (req, res) => {
     const attached = attRes.data.data;
     const qrCode = attached.attributes.next_action?.code?.image_url;
 
-    // Save payment record with payment intent ID for webhook matching
+    // Save minimal record with qrph_pending — hidden from admin until webhook confirms
     const { data: payment, error: pmtErr } = await supabase.from('payments').insert({
-      user_id:        user.id,
-      transaction_id: txn.id,
-      paymongo_id:    pi.id,
-      amount:         depositAmount,
-      status:         'pending',
+      user_id:     user.id,
+      paymongo_id: pi.id,
+      amount:      depositAmount,
+      status:      'qrph_pending',
     }).select().single();
     if (pmtErr) throw pmtErr;
 
@@ -349,19 +339,34 @@ async function _creditFromSource(sourceId) {
       .eq('paymongo_id', sourceId)
       .maybeSingle();
 
-    if (!payment || payment.status !== 'pending') return;
+    if (!payment || (payment.status !== 'pending' && payment.status !== 'qrph_pending')) return;
+
+    // For qrph_pending: create the transaction record now (not before)
+    let transactionId = payment.transaction_id;
+    if (!transactionId) {
+      const { data: user } = await supabase.from('users').select('balance').eq('id', payment.user_id).single();
+      const balanceBefore = parseFloat(user?.balance || 0);
+      const { data: txn, error: txnErr } = await supabase.from('transactions').insert({
+        user_id:        payment.user_id,
+        type:           'deposit',
+        amount:         parseFloat(payment.amount),
+        balance_before: balanceBefore,
+        balance_after:  balanceBefore,
+        note:           `QRPh deposit ₱${payment.amount} — AUTO CREDITED via PayMongo`,
+      }).select().single();
+      if (txnErr) throw txnErr;
+      transactionId = txn.id;
+      await supabase.from('payments').update({ transaction_id: transactionId }).eq('id', payment.id);
+    }
 
     const { data: result } = await supabase.rpc('confirm_deposit', {
       p_payment_id:     payment.id,
-      p_transaction_id: payment.transaction_id,
+      p_transaction_id: transactionId,
       p_user_id:        payment.user_id,
       p_amount:         parseFloat(payment.amount),
     });
 
     if (result?.success) {
-      await supabase.from('transactions').update({
-        note: `Deposit ₱${payment.amount} — AUTO CREDITED via PayMongo`,
-      }).eq('id', payment.transaction_id);
       console.log(`[Webhook] ✅ Auto-credited ₱${payment.amount} to user ${payment.user_id}`);
     }
   } catch (err) {

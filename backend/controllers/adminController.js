@@ -307,6 +307,7 @@ exports.getDeposits = async (req, res) => {
     let query = supabase
       .from('payments')
       .select('*, user:users(id, name, phone, balance)')
+      .neq('status', 'qrph_pending')
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
