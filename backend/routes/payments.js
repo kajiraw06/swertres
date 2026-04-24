@@ -4,22 +4,22 @@ const ctrl = require('../controllers/paymentController');
 const { authenticate } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 
-// Public — no auth (players need to see where to send before logging in)
+// Public — no auth
 router.get('/admin-gcash', ctrl.getAdminGcash);
+router.get('/pay/:token', ctrl.handleGcashPayLink);
 
 // All other routes require authentication
 router.use(authenticate);
 
-router.post('/gcash-checkout',
+router.post('/gcash-link',
   [body('amount').isFloat({ min: 100 }).withMessage('Minimum deposit is ₱100.')],
   validate,
-  ctrl.createGcashCheckout
+  ctrl.createGcashLink
 );
 
-router.post('/qrph-checkout',
-  [body('amount').isFloat({ min: 100 }).withMessage('Minimum deposit is ₱100.')],
-  validate,
-  ctrl.createQrphCheckout
+// Stub for old route — tells users on cached frontend to refresh
+router.post('/qrph-checkout', (req, res) =>
+  res.status(410).json({ message: 'Please refresh the page to use the new deposit method.' })
 );
 
 router.post('/deposit',
@@ -31,7 +31,6 @@ router.post('/deposit',
   ctrl.createDeposit
 );
 
-router.get('/status/:paymentId', ctrl.getStatus);
 router.get('/history', ctrl.getHistory);
 router.get('/withdrawals', ctrl.getMyWithdrawals);
 router.post('/withdraw',

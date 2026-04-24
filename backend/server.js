@@ -41,10 +41,6 @@ app.use('/api/bets/',         limiter(200, 15));
 app.use('/api/payments/',     limiter(60, 15));
 app.use('/api/admin/',        limiter(200, 15));
 
-// Webhook needs raw body — must be registered BEFORE express.json()
-const paymentCtrl = require('./controllers/paymentController');
-app.post('/api/payments/webhook', express.raw({ type: '*/*' }), paymentCtrl.handleWebhook);
-
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 

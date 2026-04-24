@@ -1,11 +1,15 @@
 const supabase = require('../config/supabase');
-const axios    = require('axios');
+const QRCode   = require('qrcode');
+const crypto   = require('crypto');
 
-const PM_BASE = 'https://api.paymongo.com/v1';
-const pmHeaders = () => ({
-  Authorization:  `Basic ${Buffer.from(process.env.PAYMONGO_SECRET_KEY + ':').toString('base64')}`,
-  'Content-Type': 'application/json',
-});
+// ── In-memory token store: token -> { gcashNumber, gcashName, amount, expiresAt } ──
+const gcashPayTokens = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of gcashPayTokens) {
+    if (v.expiresAt < now) gcashPayTokens.delete(k);
+  }
+}, 5 * 60 * 1000);
 
 // GET /api/payments/admin-gcash  (public — no auth needed)
 exports.getAdminGcash = (req, res) => {
@@ -15,73 +19,112 @@ exports.getAdminGcash = (req, res) => {
   });
 };
 
-// POST /api/payments/gcash-checkout  (automatic via PayMongo)
-exports.createGcashCheckout = async (req, res) => {
+// GET /api/pay/:token  (PUBLIC — serves GCash redirect page)
+exports.handleGcashPayLink = (req, res) => {
+  const record = gcashPayTokens.get(req.params.token);
+  if (!record || record.expiresAt < Date.now()) {
+    return res.status(410).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Expired</title><style>body{font-family:sans-serif;text-align:center;padding:40px;background:#fef2f2}h2{color:#991b1b}p{color:#6b7280}</style></head><body><h2>\u274C Link Expired</h2><p>This QR code has expired. Please generate a new one in the app.</p></body></html>`);
+  }
+
+  const { gcashNumber, gcashName, amount } = record;
+  const masked = gcashNumber.replace(/^(09\d{2})\d{5}(\d{2})$/, '$1XXXXX$2');
+  const deepLink = `gcash://send?to=${gcashNumber}&amount=${Math.round(amount)}`;
+  const formatted = parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+
+  return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swertres \u2014 GCash Deposit</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#f0fdf4,#dcfce7);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{background:#fff;border-radius:24px;padding:32px 24px;max-width:360px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.15);text-align:center}
+    .logo{font-size:44px;margin-bottom:10px}
+    h1{font-size:20px;color:#065f46;font-weight:900;margin-bottom:4px}
+    .sub{color:#9ca3af;font-size:13px;margin-bottom:24px}
+    .amount{font-size:46px;font-weight:900;color:#059669;letter-spacing:-1px;margin-bottom:4px}
+    .amt-label{font-size:13px;color:#9ca3af;margin-bottom:20px}
+    .info{background:#f0fdf4;border:1.5px solid #86efac;border-radius:14px;padding:16px 18px;margin-bottom:24px;text-align:left}
+    .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:14px}
+    .row:last-child{margin-bottom:0}
+    .row-label{color:#6b7280}
+    .row-val{font-weight:800;color:#065f46}
+    .btn{display:block;width:100%;padding:18px;background:linear-gradient(90deg,#059669,#10b981);color:#fff;border:none;border-radius:16px;font-size:18px;font-weight:900;cursor:pointer;text-decoration:none;margin-bottom:16px;box-shadow:0 4px 16px rgba(5,150,105,0.4)}
+    ol{text-align:left;font-size:13px;color:#374151;padding-left:20px;line-height:1.8;margin-bottom:16px}
+    .note{font-size:12px;color:#d1d5db;margin-top:8px}
+    .warn{background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:10px 14px;font-size:13px;color:#854d0e;margin-top:16px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">\uD83D\uDCB8</div>
+    <h1>Swertres Deposit</h1>
+    <p class="sub">Send via GCash</p>
+    <div class="amount">\u20B1${formatted}</div>
+    <p class="amt-label">Send EXACTLY this amount</p>
+    <div class="info">
+      <div class="row"><span class="row-label">Send to</span><span class="row-val">${gcashName}</span></div>
+      <div class="row"><span class="row-label">Number</span><span class="row-val">${masked}</span></div>
+      <div class="row"><span class="row-label">Amount</span><span class="row-val">\u20B1${formatted}</span></div>
+    </div>
+    <a class="btn" href="${deepLink}" id="openBtn">\uD83D\uDCF1 Open GCash App</a>
+    <ol>
+      <li>Tap <strong>Open GCash App</strong> above</li>
+      <li>Send exactly <strong>\u20B1${formatted}</strong></li>
+      <li>Save your <strong>reference number</strong></li>
+      <li>Go back to Swertres &rarr; Wallet &rarr; submit reference</li>
+    </ol>
+    <div class="warn">\u26A0\uFE0F Do NOT close Swertres before submitting your reference number.</div>
+    <p class="note">\u23F0 This link expires 30 minutes after QR was generated</p>
+  </div>
+  <script>
+    // Auto-attempt GCash deep link on mobile
+    if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+      setTimeout(() => { window.location.href = '${deepLink}'; }, 600);
+    }
+  </script>
+</body>
+</html>`);
+};
+
+// POST /api/payments/gcash-link  (authenticated — creates token URL + QR)
+exports.createGcashLink = async (req, res) => {
   try {
-    const { amount } = req.body;
-    const depositAmount = parseFloat(amount);
-    if (isNaN(depositAmount) || depositAmount < 100)
-      return res.status(400).json({ message: 'Minimum deposit is ₱100.' });
+    const amount = parseFloat(req.body.amount);
+    if (isNaN(amount) || amount < 100)
+      return res.status(400).json({ message: 'Minimum deposit is \u20B1100.' });
 
-    const { data: user } = await supabase
-      .from('users').select('id, name, phone, email, balance').eq('id', req.user.id).single();
-    if (!user) return res.status(404).json({ message: 'User not found.' });
+    const gcashNumber = process.env.ADMIN_GCASH_NUMBER;
+    const gcashName   = process.env.ADMIN_GCASH_NAME || 'Swertres Admin';
+    if (!gcashNumber)
+      return res.status(503).json({ message: 'GCash deposit temporarily unavailable.' });
 
-    // Create pending transaction (balance credited only after webhook)
-    const { data: txn, error: txnErr } = await supabase.from('transactions').insert({
-      user_id:        user.id,
-      type:           'deposit',
-      amount:         depositAmount,
-      balance_before: parseFloat(user.balance),
-      balance_after:  parseFloat(user.balance),
-      note:           `GCash deposit ₱${depositAmount} — awaiting PayMongo confirmation`,
-    }).select().single();
-    if (txnErr) throw txnErr;
+    // Create a 30-minute single-use token
+    const token = crypto.randomBytes(20).toString('hex');
+    gcashPayTokens.set(token, {
+      gcashNumber,
+      gcashName,
+      amount,
+      userId:    req.user.id,
+      expiresAt: Date.now() + 30 * 60 * 1000,
+    });
 
-    // Create payment record first to get our internal ID for the redirect URL
-    const { data: payment, error: pmtErr } = await supabase.from('payments').insert({
-      user_id:        user.id,
-      transaction_id: txn.id,
-      amount:         depositAmount,
-      status:         'pending',
-    }).select().single();
-    if (pmtErr) throw pmtErr;
+    const baseUrl = process.env.BACKEND_URL || 'https://swertres-backend.fly.dev';
+    const payUrl  = `${baseUrl}/api/payments/pay/${token}`;
 
-    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    // QR encodes a URL — phone number is never in the QR
+    const qrImage = await QRCode.toDataURL(payUrl, {
+      width:  300,
+      margin: 2,
+      color:  { dark: '#065f46', light: '#ffffff' },
+    });
 
-    // Create PayMongo GCash source
-    const sourceRes = await axios.post(`${PM_BASE}/sources`, {
-      data: {
-        attributes: {
-          amount:   Math.round(depositAmount * 100), // centavos
-          redirect: {
-            success: `${appUrl}/payment-result?success=true&payment_id=${payment.id}`,
-            failed:  `${appUrl}/payment-result?success=false&payment_id=${payment.id}`,
-          },
-          billing: {
-            name:  user.name || 'Swertres User',
-            phone: user.phone || '',
-            email: user.email || ((user.phone || '').replace(/\D/g, '') ? `${(user.phone || '').replace(/\D/g, '')}@swertres.app` : `user${user.id}@swertres.app`),
-          },
-          type:     'gcash',
-          currency: 'PHP',
-        },
-      },
-    }, { headers: pmHeaders() });
-
-    const source      = sourceRes.data.data;
-    const checkoutUrl = source.attributes.redirect.checkout_url;
-
-    // Save PayMongo source ID + checkout URL to payment record
-    await supabase.from('payments').update({
-      paymongo_id:  source.id,
-      checkout_url: checkoutUrl,
-    }).eq('id', payment.id);
-
-    return res.json({ checkout_url: checkoutUrl, payment_id: payment.id });
+    return res.json({ qr_image: qrImage, amount });
   } catch (err) {
-    console.error('GCash checkout error:', err.response?.data || err.message);
-    return res.status(500).json({ message: 'Failed to create GCash checkout. Please try again.' });
+    console.error('GCash link error:', err.message);
+    return res.status(500).json({ message: 'Failed to generate payment QR.' });
   }
 };
 
@@ -130,94 +173,8 @@ exports.createDeposit = async (req, res) => {
   }
 };
 
-// POST /api/payments/qrph-checkout  (automated QRPh scan-to-pay via PayMongo)
-exports.createQrphCheckout = async (req, res) => {
-  try {
-    const { amount } = req.body;
-    const depositAmount = parseFloat(amount);
-    if (isNaN(depositAmount) || depositAmount < 100)
-      return res.status(400).json({ message: 'Minimum deposit is ₱100.' });
-
-    const { data: user } = await supabase
-      .from('users').select('id, name, phone, email, balance').eq('id', req.user.id).single();
-    if (!user) return res.status(404).json({ message: 'User not found.' });
-
-    // Step 1: Create Payment Intent
-    // NOTE: No transaction/payment DB record until webhook confirms payment
-    const piRes = await axios.post(`${PM_BASE}/payment_intents`, {
-      data: {
-        attributes: {
-          amount:                 Math.round(depositAmount * 100),
-          currency:               'PHP',
-          payment_method_allowed: ['qrph'],
-          capture_type:           'automatic',
-          description:            `Swertres deposit ₱${depositAmount}`,
-        },
-      },
-    }, { headers: pmHeaders() });
-    const pi = piRes.data.data;
-
-    // Step 2: Create Payment Method
-    const phoneDigits = (user.phone || '').replace(/\D/g, '');
-    const billingEmail = user.email || (phoneDigits ? `${phoneDigits}@swertres.app` : `user${user.id}@swertres.app`);
-    const pmRes = await axios.post(`${PM_BASE}/payment_methods`, {
-      data: {
-        attributes: {
-          type: 'qrph',
-          billing: {
-            name:  user.name || 'Swertres User',
-            phone: user.phone || '',
-            email: billingEmail,
-          },
-        },
-      },
-    }, { headers: pmHeaders() });
-    const pm = pmRes.data.data;
-
-    // Step 3: Attach to get QR code
-    const appUrl = process.env.APP_URL || 'https://thunderous-lebkuchen-0b668c.netlify.app';
-    const attRes = await axios.post(`${PM_BASE}/payment_intents/${pi.id}/attach`, {
-      data: {
-        attributes: {
-          payment_method: pm.id,
-          return_url:     appUrl,
-        },
-      },
-    }, { headers: pmHeaders() });
-    const attached = attRes.data.data;
-    const qrCode = attached.attributes.next_action?.code?.image_url;
-
-    // Save minimal record — transaction_id is NULL for QRPh (auto) until webhook fires
-    // Admin only sees deposits where transaction_id IS NOT NULL (manual deposits)
-    const { data: payment, error: pmtErr } = await supabase.from('payments').insert({
-      user_id:     user.id,
-      paymongo_id: pi.id,
-      amount:      depositAmount,
-      status:      'pending',
-    }).select().single();
-    if (pmtErr) throw pmtErr;
-
-    return res.json({
-      payment_id: payment.id,
-      qr_code:    qrCode,
-    });
-  } catch (err) {
-    console.error('QRPh checkout error:', err.response?.data || err.message);
-    return res.status(500).json({ message: 'Failed to create QR code. Please try again.' });
-  }
-};
-
-// GET /api/payments/status/:paymentId
-exports.getStatus = async (req, res) => {
-  try {
-    const { data: payment } = await supabase.from('payments')
-      .select('status, amount').eq('id', req.params.paymentId).eq('user_id', req.user.id).single();
-    if (!payment) return res.status(404).json({ message: 'Payment not found.' });
-    return res.json({ status: payment.status, amount: parseFloat(payment.amount) });
-  } catch (err) {
-    return res.status(500).json({ message: 'Failed to get payment status.' });
-  }
-};
+// (QRPh PayMongo checkout removed)
+exports.createQrphCheckout = (req, res) => res.status(410).json({ message: 'This payment method is no longer available.' });
 
 // GET /api/payments/history
 exports.getHistory = async (req, res) => {
@@ -276,116 +233,5 @@ exports.requestWithdrawal = async (req, res) => {
     return res.status(500).json({ message: 'Failed to submit withdrawal request.' });
   }
 };
-
-// POST /api/payments/webhook  (public, raw body — registered in server.js)
-exports.handleWebhook = async (req, res) => {
-  try {
-    const sigHeader = req.headers['paymongo-signature'];
-    if (!sigHeader) return res.status(400).send('Missing signature');
-
-    const rawBody = req.body.toString('utf8');
-    if (!verifyWebhookSignature(rawBody, sigHeader))
-      return res.status(401).send('Invalid signature');
-
-    const event = JSON.parse(rawBody);
-    const type  = event.data?.attributes?.type;
-    const data  = event.data?.attributes?.data;
-
-    if (type === 'source.chargeable') {
-      // User authorized GCash payment — now create the PayMongo payment
-      const sourceId = data?.id;
-      const amount   = data?.attributes?.amount;
-      await _chargeSource(sourceId, amount);
-    }
-
-    if (type === 'payment.paid') {
-      // PayMongo confirms payment received — auto-credit user balance
-      // Payment Intent flow (QRPh) uses payment_intent_id; Source flow (GCash) uses source.id
-      const paymentIntentId = data?.attributes?.payment_intent_id;
-      const sourceId = data?.attributes?.source?.id;
-      if (paymentIntentId) await _creditFromSource(paymentIntentId);
-      else if (sourceId) await _creditFromSource(sourceId);
-    }
-
-    return res.sendStatus(200);
-  } catch (err) {
-    console.error('Webhook error:', err.message);
-    return res.sendStatus(500);
-  }
-};
-
-async function _chargeSource(sourceId, amount) {
-  try {
-    await axios.post(`${PM_BASE}/payments`, {
-      data: {
-        attributes: {
-          amount,
-          currency:    'PHP',
-          source:      { id: sourceId, type: 'source' },
-          description: 'Swertres 3D Lotto deposit',
-        },
-      },
-    }, { headers: pmHeaders() });
-    console.log(`[Webhook] Charged source ${sourceId} for ${amount} centavos`);
-  } catch (err) {
-    console.error('[Webhook] Charge source error:', err.response?.data || err.message);
-  }
-}
-
-async function _creditFromSource(sourceId) {
-  try {
-    const { data: payment } = await supabase
-      .from('payments')
-      .select('id, user_id, amount, transaction_id, status')
-      .eq('paymongo_id', sourceId)
-      .maybeSingle();
-
-    if (!payment || payment.status !== 'pending') return;
-
-    // For qrph_pending: create the transaction record now (not before)
-    let transactionId = payment.transaction_id;
-    if (!transactionId) {
-      const { data: user } = await supabase.from('users').select('balance').eq('id', payment.user_id).single();
-      const balanceBefore = parseFloat(user?.balance || 0);
-      const { data: txn, error: txnErr } = await supabase.from('transactions').insert({
-        user_id:        payment.user_id,
-        type:           'deposit',
-        amount:         parseFloat(payment.amount),
-        balance_before: balanceBefore,
-        balance_after:  balanceBefore,
-        note:           `QRPh deposit ₱${payment.amount} — AUTO CREDITED via PayMongo`,
-      }).select().single();
-      if (txnErr) throw txnErr;
-      transactionId = txn.id;
-      await supabase.from('payments').update({ transaction_id: transactionId }).eq('id', payment.id);
-    }
-
-    const { data: result } = await supabase.rpc('confirm_deposit', {
-      p_payment_id:     payment.id,
-      p_transaction_id: transactionId,
-      p_user_id:        payment.user_id,
-      p_amount:         parseFloat(payment.amount),
-    });
-
-    if (result?.success) {
-      console.log(`[Webhook] ✅ Auto-credited ₱${payment.amount} to user ${payment.user_id}`);
-    }
-  } catch (err) {
-    console.error('[Webhook] Credit error:', err.message);
-  }
-}
-
-function verifyWebhookSignature(rawBody, sigHeader) {
-  const crypto = require('crypto');
-  const secret = process.env.PAYMONGO_WEBHOOK_SECRET;
-  const parts  = sigHeader.split(',');
-  const tPart  = parts.find((p) => p.startsWith('t='));
-  const v1Part = parts.find((p) => p.startsWith('v1='));
-  if (!tPart || !v1Part) return false;
-  const timestamp = tPart.slice(2);
-  const signature = v1Part.slice(3);
-  const expected  = crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-}
 
 
