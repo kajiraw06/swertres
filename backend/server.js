@@ -24,6 +24,7 @@ app.use(helmet());
 app.use(cors({
   origin: [
     process.env.APP_URL || 'http://localhost:3000',
+    'https://kajiraw06.github.io',
     'http://localhost:3001',
     'http://localhost:3000',
   ],
