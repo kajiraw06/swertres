@@ -34,7 +34,7 @@ function AppRoutes() {
   return (
     <>
       {user && <Navbar />}
-      <div className="app-container" style={{ maxWidth: isAdmin ? 860 : 580, margin: '0 auto', padding: '18px 16px' }}>
+      <div className="app-container" style={{ maxWidth: isAdmin ? 1200 : 580, margin: '0 auto', padding: '18px 16px' }}>
         <Routes>
           <Route path="/login"          element={user ? <Navigate to="/" /> : <Login />} />
           <Route path="/register"       element={user ? <Navigate to="/" /> : <Register />} />
