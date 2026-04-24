@@ -71,6 +71,22 @@ export default function Admin() {
   const [depFilter, setDepFilter]   = useState('pending');
   const [depNote, setDepNote]       = useState({});
 
+  // Alerts
+  const [alerts, setAlerts]         = useState([]); // { id, type, message, time }
+  const alertIdRef                  = React.useRef(0);
+  const prevPendingWd               = React.useRef(null);
+  const prevPendingDep              = React.useRef(null);
+
+  const pushAlert = (type, message) => {
+    const id = ++alertIdRef.current;
+    setAlerts(prev => [{ id, type, message, time: new Date() }, ...prev].slice(0, 20));
+    if (type === 'withdraw') toast('💸 ' + message, { icon: '💸', style: { background: '#fef3c7', color: '#92400e', fontWeight: 700 } });
+    else if (type === 'deposit') toast('💰 ' + message, { icon: '💰', style: { background: '#dcfce7', color: '#166534', fontWeight: 700 } });
+    else if (type === 'limit') toast('⚠️ ' + message, { icon: '⚠️', style: { background: '#fef2f2', color: '#dc2626', fontWeight: 700 } });
+    return id;
+  };
+  const dismissAlert = (id) => setAlerts(prev => prev.filter(a => a.id !== id));
+
   // Build lookup: 'drawTime:numbers' → limit record
   const limitsMap = useMemo(() =>
     limits.reduce((acc, l) => { acc[`${l.draw_time}:${l.numbers}`] = l; return acc; }, {})
@@ -121,13 +137,42 @@ export default function Admin() {
 
   const loadStats = () => api.get('/admin/dashboard').then(r => setStats(r.data));
 
+  // Poll every 30s for new pending withdrawals/deposits
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const [wdRes, depRes] = await Promise.all([
+          api.get('/admin/withdrawals?status=pending'),
+          api.get('/admin/deposits?status=pending'),
+        ]);
+        const newWds  = wdRes.data.withdrawals  || [];
+        const newDeps = depRes.data.deposits     || [];
+
+        if (prevPendingWd.current !== null && newWds.length > prevPendingWd.current) {
+          const diff = newWds.length - prevPendingWd.current;
+          pushAlert('withdraw', `${diff} new withdrawal request${diff > 1 ? 's' : ''} waiting for approval!`);
+        }
+        if (prevPendingDep.current !== null && newDeps.length > prevPendingDep.current) {
+          const diff = newDeps.length - prevPendingDep.current;
+          pushAlert('deposit', `${diff} new cash-in request${diff > 1 ? 's' : ''} waiting for approval!`);
+        }
+        prevPendingWd.current  = newWds.length;
+        prevPendingDep.current = newDeps.length;
+
+        setWithdrawals(newWds);
+        setDeposits(newDeps);
+      } catch (_) {}
+    };
+    poll(); // run immediately
+    const iv = setInterval(poll, 30000);
+    return () => clearInterval(iv);
+  }, []); // eslint-disable-line
+
   useEffect(() => {
     loadStats();
     api.get('/admin/users').then(r => setUsers(r.data.users || []));
     api.get(`/admin/bets?draw_date=${drawDate}&limit=500`).then(r => setAllBets(r.data.bets || []));
     api.get('/admin/bet-limits').then(r => setLimits(r.data.limits || []));
-    api.get('/admin/withdrawals?status=pending').then(r => setWithdrawals(r.data.withdrawals || []));
-    api.get('/admin/deposits?status=pending').then(r => setDeposits(r.data.deposits || []));
     // Auto-refresh stats every 60 seconds
     const interval = setInterval(loadStats, 60000);
     return () => clearInterval(interval);
@@ -135,9 +180,31 @@ export default function Admin() {
 
   const loadBets = () => {
     api.get(`/admin/bets?draw_date=${drawDate}&limit=500`).then(r => {
-      setAllBets(r.data.bets || []);
+      const bets = r.data.bets || [];
+      setAllBets(bets);
       setExpanded(null);
       setNumSearch('');
+
+      // Check limit-exceeded alerts
+      const grouped = {};
+      for (const b of bets) {
+        if (!grouped[`${b.draw_time}:${b.numbers}`])
+          grouped[`${b.draw_time}:${b.numbers}`] = 0;
+        grouped[`${b.draw_time}:${b.numbers}`] += parseFloat(b.amount);
+      }
+      const alreadyAlerted = new Set();
+      for (const [key, total] of Object.entries(grouped)) {
+        if (alreadyAlerted.has(key)) continue;
+        setLimits(currentLimits => {
+          const lim = currentLimits.find(l => `${l.draw_time}:${l.numbers}` === key);
+          if (lim && lim.max_amount && total > lim.max_amount && !lim.is_blocked) {
+            const [drawTime, numbers] = key.split(':');
+            pushAlert('limit', `${numbers} (${drawTime}) exceeded limit! ₱${total.toFixed(2)} / ₱${lim.max_amount}`);
+            alreadyAlerted.add(key);
+          }
+          return currentLimits;
+        });
+      }
     });
   };
 
@@ -330,6 +397,38 @@ export default function Admin() {
 
   return (
     <div className="animate-fadeInUp">
+
+      {/* 🔔 Alert Panel */}
+      {alerts.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: '#dc2626' }}>
+              🔔 Alerts <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10, padding: '1px 8px', fontSize: 12, marginLeft: 4 }}>{alerts.length}</span>
+            </div>
+            <button onClick={() => setAlerts([])} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>Clear all</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {alerts.map(a => (
+              <div key={a.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10,
+                background: a.type === 'withdraw' ? '#fef3c7' : a.type === 'deposit' ? '#dcfce7' : '#fef2f2',
+                border: `1.5px solid ${a.type === 'withdraw' ? '#fcd34d' : a.type === 'deposit' ? '#86efac' : '#fca5a5'}`,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
+              }}>
+                <span style={{ fontSize: 20 }}>
+                  {a.type === 'withdraw' ? '💸' : a.type === 'deposit' ? '💰' : '⚠️'}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: a.type === 'withdraw' ? '#92400e' : a.type === 'deposit' ? '#166534' : '#dc2626' }}>{a.message}</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{a.time.toLocaleTimeString()}</div>
+                </div>
+                <button onClick={() => dismissAlert(a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, padding: '0 4px', fontFamily: 'inherit' }}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div style={S.card}>
         <div style={S.title}>⚙️ Admin Dashboard</div>
