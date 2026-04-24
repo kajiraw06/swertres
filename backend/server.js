@@ -33,11 +33,13 @@ app.use(cors({
 }));
 
 // Rate limiting
-const limiter = (max) => rateLimit({ windowMs: 15 * 60 * 1000, max, standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false } });
-app.use('/api/auth/',     limiter(200));
-app.use('/api/bets/',     limiter(500));
-app.use('/api/payments/', limiter(300));
-app.use('/api/admin/',    limiter(500));
+const limiter = (max, windowMin = 15) => rateLimit({ windowMs: windowMin * 60 * 1000, max, standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false } });
+app.use('/api/auth/login',    limiter(10, 15));   // 10 login attempts per 15 min
+app.use('/api/auth/register', limiter(5, 60));    // 5 registrations per hour
+app.use('/api/auth/',         limiter(30, 15));   // other auth endpoints
+app.use('/api/bets/',         limiter(200, 15));
+app.use('/api/payments/',     limiter(60, 15));
+app.use('/api/admin/',        limiter(200, 15));
 
 // Webhook needs raw body — must be registered BEFORE express.json()
 const paymentCtrl = require('./controllers/paymentController');
