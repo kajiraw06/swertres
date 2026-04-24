@@ -84,11 +84,27 @@ export default function Admin() {
     if (!val || val <= 0) return toast.error('Enter a valid limit amount.');
     setSavingLimitFor(prev => new Set(prev).add(key));
     try {
-      await api.post('/admin/bet-limits', { draw_time, numbers, max_amount: val, is_blocked: false });
+      const existing = limitsMap[key];
+      await api.post('/admin/bet-limits', { draw_time, numbers, max_amount: val, is_blocked: existing?.is_blocked ?? false });
       toast.success(`Limit set for ${numbers} (${draw_time}).`);
       await refreshLimits();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
     finally { setSavingLimitFor(prev => { const s = new Set(prev); s.delete(key); return s; }); }
+  };
+
+  const toggleBlock = async (numbers, draw_time) => {
+    const key = `${draw_time}:${numbers}`;
+    const existing = limitsMap[key];
+    const newBlocked = !(existing?.is_blocked ?? false);
+    try {
+      await api.post('/admin/bet-limits', {
+        draw_time, numbers,
+        max_amount: existing?.max_amount ?? 0,
+        is_blocked: newBlocked,
+      });
+      toast.success(newBlocked ? `${numbers} (${draw_time}) blocked.` : `${numbers} (${draw_time}) unblocked.`);
+      await refreshLimits();
+    } catch (err) { toast.error('Failed to toggle block.'); }
   };
 
   const removeInlineLimit = async (numbers, draw_time) => {
@@ -429,9 +445,9 @@ export default function Admin() {
             <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>No numbers match "{numSearch}"</div>
           ) : (
             <div className="scroll-x" style={{ borderRadius: 10 }}>
-            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 720 }}>
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 800 }}>
               {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
                 <span>NUMBER</span>
                 <span style={{ textAlign: 'right' }}>STRAIGHT</span>
                 <span style={{ textAlign: 'right' }}>RAMBOLITO</span>
@@ -439,6 +455,7 @@ export default function Admin() {
                 <span style={{ textAlign: 'right' }}>IF WINS</span>
                 <span style={{ textAlign: 'center' }}>LIMIT</span>
                 <span style={{ textAlign: 'right' }}>EXCESS</span>
+                <span style={{ textAlign: 'center' }}>BLOCK</span>
                 <span></span>
               </div>
 
@@ -456,7 +473,7 @@ export default function Admin() {
                     {/* Main row */}
                     <div
                       style={{
-                        display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px',
+                        display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px',
                         padding: '0 14px', gap: 8, alignItems: 'center', minHeight: 48,
                         background: isOpen ? riskBg(p) : idx % 2 === 0 ? '#fff' : '#fafbff',
                         borderTop: '1px solid #e2e8f0',
@@ -509,6 +526,21 @@ export default function Admin() {
                           : excess > 0
                             ? <span style={{ color: '#dc2626' }}>+₱{excess.toFixed(2)}</span>
                             : <span style={{ color: '#16a34a' }}>OK</span>}
+                      </div>
+
+                      {/* BLOCK cell */}
+                      <div style={{ display: 'flex', justifyContent: 'center' }} onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => toggleBlock(row.numbers, activeTab)}
+                          title={existingLimit?.is_blocked ? 'Click to unblock' : 'Click to block'}
+                          style={{
+                            height: 28, padding: '0 10px', borderRadius: 6, border: 'none',
+                            fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+                            background: existingLimit?.is_blocked ? '#dc2626' : '#e2e8f0',
+                            color: existingLimit?.is_blocked ? '#fff' : '#64748b',
+                          }}>
+                          {existingLimit?.is_blocked ? '🚫 ON' : 'OFF'}
+                        </button>
                       </div>
 
                       <div style={{ textAlign: 'center', fontSize: 14, color: '#94a3b8', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>{isOpen ? '▲' : '▼'}</div>
@@ -614,15 +646,13 @@ export default function Admin() {
               })}
 
               {/* Grand total row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 70px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
                 <span style={{ fontSize: 13 }}>TOTAL ({Object.keys(grouped).length})</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.straightAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.ramboAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 15, color: '#86efac' }}>₱{totalCollected.toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13, color: '#fca5a5' }}>₱{totalPayoutRisk.toLocaleString()}</span>
-                <span></span>
-                <span></span>
-                <span></span>
+                <span></span><span></span><span></span><span></span>
               </div>
             </div>
             </div>

@@ -56,23 +56,6 @@ exports.placeBet = async (req, res) => {
     if (limitRow?.is_blocked)
       return res.status(400).json({ message: `Number ${numbers} is not available for ${draw_time}.` });
 
-    if (limitRow?.max_amount) {
-      // Sum existing accepted bets on this number for this draw
-      const { data: existing } = await supabase
-        .from('bets')
-        .select('amount')
-        .eq('draw_date', targetDate)
-        .eq('draw_time', draw_time)
-        .eq('numbers', numbers)
-        .in('status', ['pending', 'won', 'lost']);
-
-      const totalSoFar = (existing || []).reduce((s, b) => s + parseFloat(b.amount), 0);
-      if (totalSoFar + betAmount > limitRow.max_amount)
-        return res.status(400).json({
-          message: `Maximum bet for ${numbers} (${draw_time}) is ₱${limitRow.max_amount}. ₱${(limitRow.max_amount - totalSoFar).toFixed(2)} remaining.`
-        });
-    }
-
     const { data, error } = await supabase.rpc('place_bet', {
       p_user_id:   userId,
       p_draw_date: targetDate,
