@@ -477,7 +477,7 @@ export default function Admin() {
                         padding: '0 14px', gap: 8, alignItems: 'center', minHeight: 48,
                         background: isOpen ? riskBg(p) : idx % 2 === 0 ? '#fff' : '#fafbff',
                         borderTop: '1px solid #e2e8f0',
-                        borderLeft: `4px solid ${riskColor(p)}`,
+                        boxShadow: `inset 4px 0 0 ${riskColor(p)}`,
                       }}>
                       <div style={{ cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}><Num numbers={row.numbers} /></div>
                       <div style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
