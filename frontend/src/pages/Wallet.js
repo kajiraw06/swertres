@@ -23,15 +23,10 @@ const QUICK = [100, 200, 500, 1000];
 
 export default function Wallet() {
   const { user, refreshUser } = useAuth();
-  const [amount, setAmount]     = useState(100);
-  const [history, setHistory]   = useState([]);
+  const [amount, setAmount]   = useState(100);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  // Manual GCash deposit
-  const [adminGcash, setAdminGcash] = useState(null);
-  const [gcashRef, setGcashRef]     = useState('');
-  const [depLoading, setDepLoading] = useState(false);
-
-  // Withdrawal
   const [wdAmount, setWdAmount]   = useState(100);
   const [wdPhone, setWdPhone]     = useState('');
   const [wdName, setWdName]       = useState('');
@@ -45,23 +40,18 @@ export default function Wallet() {
   useEffect(() => {
     refreshUser();
     api.get('/payments/history').then(r => setHistory(r.data.transactions));
-    api.get('/payments/admin-gcash').then(r => setAdminGcash(r.data)).catch(() => {});
     loadWithdrawals();
-  }, []);
+  }, []); // eslint-disable-line
 
-  const handleDeposit = async () => {
+  const handleGcashCheckout = async () => {
     if (amount < 100) return toast.error('Minimum deposit is ₱100.');
-    if (!gcashRef.trim()) return toast.error('Enter your GCash reference number.');
-    setDepLoading(true);
+    setLoading(true);
     try {
-      const { data } = await api.post('/payments/deposit', { amount, gcash_reference: gcashRef.trim() });
-      toast.success(data.message);
-      setGcashRef('');
-      api.get('/payments/history').then(r => setHistory(r.data.transactions));
+      const { data } = await api.post('/payments/gcash-checkout', { amount });
+      window.location.href = data.checkout_url;
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to submit. Try again.');
-    } finally {
-      setDepLoading(false);
+      toast.error(err.response?.data?.message || 'Failed to create checkout. Try again.');
+      setLoading(false);
     }
   };
 
@@ -85,7 +75,7 @@ export default function Wallet() {
   return (
     <div className="animate-fadeInUp">
 
-      {/* ── Balance hero ─────────────────── */}
+      {/* Balance */}
       <div style={{
         background: 'linear-gradient(135deg,#0d1a4a,#1e40af,#2563eb)',
         borderRadius: 22, padding: '22px', marginBottom: 14,
@@ -95,25 +85,16 @@ export default function Wallet() {
           Your Balance
         </div>
         <div style={{ fontSize: 42, fontWeight: 900, color: '#fff', letterSpacing: -1 }}>
-          ₱{parseFloat(user?.balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+          &#8369;{parseFloat(user?.balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
         </div>
       </div>
 
-      {/* ── Deposit ─────────────────────── */}
+      {/* Deposit via GCash */}
       <div style={card}>
-        <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 6 }}>� Cash In via GCash</div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
-          Send GCash to the number below, then submit your reference number for admin approval.
+        <div style={{ fontSize: 20, fontWeight: 900, color: '#007AFF', marginBottom: 6 }}>&#128154; Deposit via GCash</div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+          Pay securely via GCash. Balance is credited automatically after payment.
         </div>
-
-        {/* Admin GCash info */}
-        {adminGcash && (
-          <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '2px solid #86efac', borderRadius: 14, padding: '14px 16px', marginBottom: 16, textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#166534', fontWeight: 700, marginBottom: 4 }}>SEND GCASH TO</div>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#15803d', letterSpacing: 1 }}>{adminGcash.number}</div>
-            <div style={{ fontSize: 14, color: '#166534', fontWeight: 600, marginTop: 2 }}>{adminGcash.name}</div>
-          </div>
-        )}
 
         <label style={lbl}>Choose Amount</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -121,41 +102,44 @@ export default function Wallet() {
             <button key={a}
               style={{
                 padding: '8px 16px', borderRadius: 10, fontFamily: 'inherit',
-                border: `2px solid ${amount === a ? '#1e40af' : '#e2e8f0'}`,
+                border: `2px solid ${amount === a ? '#007AFF' : '#e2e8f0'}`,
                 background: amount === a ? '#eff6ff' : '#f8fafc',
-                color: amount === a ? '#1e40af' : '#374151',
+                color: amount === a ? '#007AFF' : '#374151',
                 fontWeight: 700, cursor: 'pointer', fontSize: 14,
               }}
-              onClick={() => setAmount(a)}>₱{a}</button>
+              onClick={() => setAmount(a)}>&#8369;{a}</button>
           ))}
         </div>
         <input style={inp} type="number" min={100} value={amount}
           onChange={e => setAmount(parseInt(e.target.value) || 100)} />
 
-        <label style={lbl}>GCash Reference Number</label>
-        <input style={{ ...inp, marginBottom: 14 }} type="text"
-          placeholder="e.g. 1234567890"
-          value={gcashRef} onChange={e => setGcashRef(e.target.value)} />
-
         <button
-          style={{ width: '100%', padding: 14, background: depLoading ? '#94a3b8' : 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: depLoading ? 'not-allowed' : 'pointer', boxShadow: depLoading ? 'none' : '0 4px 14px rgba(16,185,129,0.35)', fontFamily: 'inherit' }}
-          disabled={depLoading} onClick={handleDeposit}>
-          {depLoading ? 'Submitting…' : `Submit ₱${amount} Deposit`}
+          style={{
+            width: '100%', padding: 14,
+            background: loading ? '#94a3b8' : 'linear-gradient(90deg,#007AFF,#0055CC)',
+            color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            boxShadow: loading ? 'none' : '0 4px 14px rgba(0,122,255,0.4)',
+            fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+          disabled={loading} onClick={handleGcashCheckout}>
+          <span style={{ fontSize: 20 }}>&#128241;</span>
+          {loading ? 'Redirecting to GCash...' : `Pay &#8369;${amount} via GCash`}
         </button>
 
         <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 10 }}>
-          ⏳ Admin will verify and credit your balance shortly.
+          You will be redirected to the GCash payment page.
         </div>
       </div>
 
-      {/* ── Withdraw ─────────────────────── */}
+      {/* Withdraw */}
       <div style={card}>
-        <div style={{ fontSize: 20, fontWeight: 900, color: '#7c3aed', marginBottom: 6 }}>🏧 Withdraw to GCash</div>
+        <div style={{ fontSize: 20, fontWeight: 900, color: '#7c3aed', marginBottom: 6 }}>&#127978; Withdraw to GCash</div>
         <div style={{ background: '#fefce8', border: '1px solid #fde047', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#854d0e' }}>
-          ⚠️ Withdrawal requests are reviewed by admin and usually processed within 24 hours.
+          &#9888;&#65039; Withdrawal requests are reviewed by admin and usually processed within 24 hours.
         </div>
 
-        <label style={lbl}>Amount (minimum ₱100)</label>
+        <label style={lbl}>Amount (minimum &#8369;100)</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           {[100, 200, 500, 1000].map(a => (
             <button key={a}
@@ -166,7 +150,7 @@ export default function Wallet() {
                 color: wdAmount === a ? '#7c3aed' : '#374151',
                 fontWeight: 700, cursor: 'pointer', fontSize: 14,
               }}
-              onClick={() => setWdAmount(a)}>₱{a}</button>
+              onClick={() => setWdAmount(a)}>&#8369;{a}</button>
           ))}
         </div>
         <input style={inp} type="number" min={100} value={wdAmount} onChange={e => setWdAmount(parseInt(e.target.value) || 100)} />
@@ -177,26 +161,26 @@ export default function Wallet() {
         <button
           style={{ width: '100%', padding: 14, background: wdLoading ? '#94a3b8' : 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: wdLoading ? 'not-allowed' : 'pointer', boxShadow: wdLoading ? 'none' : '0 4px 14px rgba(124,58,237,0.35)', fontFamily: 'inherit' }}
           disabled={wdLoading} onClick={handleWithdraw}>
-          {wdLoading ? 'Submitting…' : `Request ₱${wdAmount} Withdrawal`}
+          {wdLoading ? 'Submitting...' : `Request &#8369;${wdAmount} Withdrawal`}
         </button>
       </div>
 
-      {/* ── Withdrawal history ───────────── */}
+      {/* Withdrawal history */}
       {myWithdrawals.length > 0 && (
         <div style={card}>
-          <div style={{ fontSize: 18, fontWeight: 900, color: '#1e40af', marginBottom: 14 }}>💸 My Withdrawal Requests</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: '#1e40af', marginBottom: 14 }}>&#128184; My Withdrawal Requests</div>
           {myWithdrawals.map(w => {
             const ok  = w.status === 'approved';
             const bad = w.status === 'rejected';
             return (
               <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid #f1f5f9', gap: 8, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>₱{parseFloat(w.amount).toFixed(2)} → {w.gcash_name}</div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>{w.gcash_number} · {new Date(w.created_at).toLocaleString('en-PH')}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>&#8369;{parseFloat(w.amount).toFixed(2)} to {w.gcash_name}</div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{w.gcash_number} &middot; {new Date(w.created_at).toLocaleString('en-PH')}</div>
                   {w.note && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Note: {w.note}</div>}
                 </div>
                 <span style={{ padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', background: ok ? '#dcfce7' : bad ? '#fee2e2' : '#fef3c7', color: ok ? '#166534' : bad ? '#991b1b' : '#92400e' }}>
-                  {ok ? '✓ Approved' : bad ? '✗ Rejected' : '⏳ Pending'}
+                  {ok ? 'Approved' : bad ? 'Rejected' : 'Pending'}
                 </span>
               </div>
             );
@@ -204,7 +188,7 @@ export default function Wallet() {
         </div>
       )}
 
-      {/* ── Transaction history ──────────── */}
+      {/* Transaction history */}
       <div style={card}>
         <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 14 }}>Transaction History</div>
         {history.length === 0 ? (
@@ -212,22 +196,21 @@ export default function Wallet() {
         ) : (
           history.map(tx => {
             const isCredit = tx.type === 'deposit' || tx.type === 'prize' || tx.type === 'refund';
-            const TXN_LABEL = { deposit: '💳 DEPOSIT', withdrawal: '🏧 WITHDRAWAL', bet: '🎱 BET', prize: '🏆 PRIZE WIN', refund: '↩ REFUND' };
             return (
-            <div key={tx.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14, color: tx.type === 'prize' ? '#166534' : '#1e293b' }}>{tx.note || tx.type}</div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>{new Date(tx.created_at).toLocaleString('en-PH')}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 800, fontSize: 15, color: isCredit ? '#10b981' : '#ef4444' }}>
-                  {isCredit ? '+' : '-'}₱{parseFloat(tx.amount).toFixed(2)}
+              <div key={tx.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: tx.type === 'prize' ? '#166534' : '#1e293b' }}>{tx.note || tx.type}</div>
+                  <div style={{ fontSize: 12, color: '#94a3b8' }}>{new Date(tx.created_at).toLocaleString('en-PH')}</div>
                 </div>
-                <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: isCredit ? '#dcfce7' : '#fee2e2', color: isCredit ? '#166534' : '#991b1b' }}>
-                  {TXN_LABEL[tx.type] || tx.type.toUpperCase()}
-                </span>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: isCredit ? '#10b981' : '#ef4444' }}>
+                    {isCredit ? '+' : '-'}&#8369;{parseFloat(tx.amount).toFixed(2)}
+                  </div>
+                  <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: isCredit ? '#dcfce7' : '#fee2e2', color: isCredit ? '#166534' : '#991b1b' }}>
+                    {tx.type.toUpperCase()}
+                  </span>
+                </div>
               </div>
-            </div>
             );
           })
         )}
