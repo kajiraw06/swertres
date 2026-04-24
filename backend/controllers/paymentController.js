@@ -187,12 +187,13 @@ exports.createQrphCheckout = async (req, res) => {
     const attached = attRes.data.data;
     const qrCode = attached.attributes.next_action?.code?.image_url;
 
-    // Save minimal record with qrph_pending — hidden from admin until webhook confirms
+    // Save minimal record — transaction_id is NULL for QRPh (auto) until webhook fires
+    // Admin only sees deposits where transaction_id IS NOT NULL (manual deposits)
     const { data: payment, error: pmtErr } = await supabase.from('payments').insert({
       user_id:     user.id,
       paymongo_id: pi.id,
       amount:      depositAmount,
-      status:      'qrph_pending',
+      status:      'pending',
     }).select().single();
     if (pmtErr) throw pmtErr;
 
@@ -339,7 +340,7 @@ async function _creditFromSource(sourceId) {
       .eq('paymongo_id', sourceId)
       .maybeSingle();
 
-    if (!payment || (payment.status !== 'pending' && payment.status !== 'qrph_pending')) return;
+    if (!payment || payment.status !== 'pending') return;
 
     // For qrph_pending: create the transaction record now (not before)
     let transactionId = payment.transaction_id;
