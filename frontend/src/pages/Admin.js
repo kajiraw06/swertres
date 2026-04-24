@@ -38,6 +38,8 @@ export default function Admin() {
   const [winners, setWinners]       = useState({});
   const [tallyPage, setTallyPage]   = useState('0'); // first digit 0-9
   const [showAll, setShowAll]       = useState(false); // toggle all 1000 vs bets-only
+  const [limitInputs, setLimitInputs]     = useState({}); // { 'drawTime:numbers': value }
+  const [savingLimitFor, setSavingLimitFor] = useState(new Set());
 
   // Winners payout section
   const [payoutDate, setPayoutDate]     = useState(new Date().toISOString().slice(0, 10));
@@ -68,6 +70,38 @@ export default function Admin() {
   const [deposits, setDeposits]     = useState([]);
   const [depFilter, setDepFilter]   = useState('pending');
   const [depNote, setDepNote]       = useState({});
+
+  // Build lookup: 'drawTime:numbers' → limit record
+  const limitsMap = useMemo(() =>
+    limits.reduce((acc, l) => { acc[`${l.draw_time}:${l.numbers}`] = l; return acc; }, {})
+  , [limits]);
+
+  const refreshLimits = () => api.get('/admin/bet-limits').then(r => setLimits(r.data.limits || []));
+
+  const saveInlineLimit = async (numbers, draw_time) => {
+    const key = `${draw_time}:${numbers}`;
+    const val = parseFloat(limitInputs[key]);
+    if (!val || val <= 0) return toast.error('Enter a valid limit amount.');
+    setSavingLimitFor(prev => new Set(prev).add(key));
+    try {
+      await api.post('/admin/bet-limits', { draw_time, numbers, max_amount: val, is_blocked: false });
+      toast.success(`Limit set for ${numbers} (${draw_time}).`);
+      await refreshLimits();
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
+    finally { setSavingLimitFor(prev => { const s = new Set(prev); s.delete(key); return s; }); }
+  };
+
+  const removeInlineLimit = async (numbers, draw_time) => {
+    const key = `${draw_time}:${numbers}`;
+    const existing = limitsMap[key];
+    if (!existing) return;
+    try {
+      await api.delete(`/admin/bet-limits/${existing.id}`);
+      setLimits(prev => prev.filter(l => l.id !== existing.id));
+      setLimitInputs(prev => { const n = { ...prev }; delete n[key]; return n; });
+      toast.success('Limit removed.');
+    } catch (err) { toast.error('Failed to remove limit.'); }
+  };
 
   const loadStats = () => api.get('/admin/dashboard').then(r => setStats(r.data));
 
@@ -395,46 +429,89 @@ export default function Admin() {
             <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>No numbers match "{numSearch}"</div>
           ) : (
             <div className="scroll-x" style={{ borderRadius: 10 }}>
-            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 560 }}>
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 720 }}>
               {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px', background: '#1e40af', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 700, gap: 8, alignItems: 'center' }}>
                 <span>NUMBER</span>
                 <span style={{ textAlign: 'right' }}>STRAIGHT</span>
                 <span style={{ textAlign: 'right' }}>RAMBOLITO</span>
                 <span style={{ textAlign: 'right' }}>TOTAL BET</span>
                 <span style={{ textAlign: 'right' }}>IF WINS</span>
+                <span style={{ textAlign: 'center' }}>LIMIT</span>
+                <span style={{ textAlign: 'right' }}>EXCESS</span>
                 <span></span>
               </div>
 
               {rows.map((row, idx) => {
                 const p = payout(row);
                 const isOpen = expanded === row.numbers;
+                const lmKey = `${activeTab}:${row.numbers}`;
+                const existingLimit = limitsMap[lmKey];
+                const limitAmt = existingLimit ? existingLimit.max_amount : null;
+                const excess = limitAmt !== null ? row.total - limitAmt : null;
+                const inputVal = limitInputs[lmKey] !== undefined ? limitInputs[lmKey] : (limitAmt !== null ? String(limitAmt) : '');
+                const isSaving = savingLimitFor.has(lmKey);
                 return (
                   <React.Fragment key={row.numbers}>
                     {/* Main row */}
                     <div
-                      onClick={() => handleExpand(row.numbers)}
                       style={{
-                        display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 28px',
-                        padding: '10px 14px', gap: 8, alignItems: 'center', cursor: 'pointer',
+                        display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px',
+                        padding: '8px 14px', gap: 8, alignItems: 'center',
                         background: isOpen ? riskBg(p) : idx % 2 === 0 ? '#fff' : '#fafbff',
                         borderTop: '1px solid #e2e8f0',
                         borderLeft: `4px solid ${riskColor(p)}`,
                       }}>
-                      <span><Num numbers={row.numbers} /></span>
-                      <span style={{ textAlign: 'right', fontSize: 13 }}>
+                      <span style={{ cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}><Num numbers={row.numbers} /></span>
+                      <span style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
                         {row.straightAmt > 0
                           ? <><span style={{ fontWeight: 700 }}>₱{row.straightAmt.toFixed(2)}</span><br /><span style={{ fontSize: 11, color: '#64748b' }}>{row.bettors.filter(b => b.bet_type === 'straight').length} bet{row.bettors.filter(b => b.bet_type === 'straight').length !== 1 ? 's' : ''}</span></>
                           : <span style={{ color: '#cbd5e1' }}>—</span>}
                       </span>
-                      <span style={{ textAlign: 'right', fontSize: 13 }}>
+                      <span style={{ textAlign: 'right', fontSize: 13, cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>
                         {row.ramboAmt > 0
                           ? <><span style={{ fontWeight: 700 }}>₱{row.ramboAmt.toFixed(2)}</span><br /><span style={{ fontSize: 11, color: '#64748b' }}>{row.bettors.filter(b => b.bet_type !== 'straight').length} bet{row.bettors.filter(b => b.bet_type !== 'straight').length !== 1 ? 's' : ''}</span></>
                           : <span style={{ color: '#cbd5e1' }}>—</span>}
                       </span>
-                      <span style={{ textAlign: 'right', fontWeight: 900, fontSize: 15, color: '#16a34a' }}>₱{row.total.toFixed(2)}</span>
-                      <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: riskColor(p) }}>₱{p.toLocaleString()}</span>
-                      <span style={{ textAlign: 'center', fontSize: 14, color: '#94a3b8' }}>{isOpen ? '▲' : '▼'}</span>
+                      <span style={{ textAlign: 'right', fontWeight: 900, fontSize: 15, color: '#16a34a', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{row.total.toFixed(2)}</span>
+                      <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: riskColor(p), cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{p.toLocaleString()}</span>
+
+                      {/* LIMIT cell */}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} onClick={e => e.stopPropagation()}>
+                        <input
+                          type="number" min="0" step="10"
+                          placeholder="Limit"
+                          value={inputVal}
+                          onChange={e => setLimitInputs(prev => ({ ...prev, [lmKey]: e.target.value }))}
+                          style={{ width: 72, padding: '3px 6px', borderRadius: 6, border: `1.5px solid ${existingLimit ? '#f59e0b' : '#e2e8f0'}`, fontSize: 12, fontFamily: 'inherit', background: existingLimit ? '#fffbeb' : '#fff' }}
+                        />
+                        <button
+                          onClick={() => saveInlineLimit(row.numbers, activeTab)}
+                          disabled={isSaving}
+                          title="Save limit"
+                          style={{ padding: '3px 7px', borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>
+                          {isSaving ? '…' : existingLimit ? '✓' : '+'}
+                        </button>
+                        {existingLimit && (
+                          <button
+                            onClick={() => removeInlineLimit(row.numbers, activeTab)}
+                            title="Remove limit"
+                            style={{ padding: '3px 6px', borderRadius: 6, border: 'none', background: '#fef2f2', color: '#dc2626', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            ✕
+                          </button>
+                        )}
+                      </span>
+
+                      {/* EXCESS cell */}
+                      <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 12 }}>
+                        {excess === null
+                          ? <span style={{ color: '#cbd5e1' }}>—</span>
+                          : excess > 0
+                            ? <span style={{ color: '#dc2626' }}>+₱{excess.toFixed(2)}</span>
+                            : <span style={{ color: '#16a34a' }}>OK</span>}
+                      </span>
+
+                      <span style={{ textAlign: 'center', fontSize: 14, color: '#94a3b8', cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>{isOpen ? '▲' : '▼'}</span>
                     </div>
 
                     {/* Expanded bettors + past winners */}
@@ -537,12 +614,14 @@ export default function Admin() {
               })}
 
               {/* Grand total row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 100px 100px 160px 80px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
                 <span style={{ fontSize: 13 }}>TOTAL ({Object.keys(grouped).length})</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.straightAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.ramboAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 15, color: '#86efac' }}>₱{totalCollected.toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13, color: '#fca5a5' }}>₱{totalPayoutRisk.toLocaleString()}</span>
+                <span></span>
+                <span></span>
                 <span></span>
               </div>
             </div>
