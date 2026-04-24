@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -23,15 +23,13 @@ const QUICK = [100, 200, 500, 1000];
 
 export default function Wallet() {
   const { user, refreshUser } = useAuth();
-  const [amount, setAmount] = useState(100);
-  const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [amount, setAmount]     = useState(100);
+  const [history, setHistory]   = useState([]);
 
-  // QRPh state
-  const [qrCode, setQrCode]             = useState(null);
-  const [qrPaymentId, setQrPaymentId]   = useState(null);
-  const [qrPaid, setQrPaid]             = useState(false);
-  const pollRef = useRef(null);
+  // Manual GCash deposit
+  const [adminGcash, setAdminGcash] = useState(null);
+  const [gcashRef, setGcashRef]     = useState('');
+  const [depLoading, setDepLoading] = useState(false);
 
   // Withdrawal
   const [wdAmount, setWdAmount]   = useState(100);
@@ -47,43 +45,23 @@ export default function Wallet() {
   useEffect(() => {
     refreshUser();
     api.get('/payments/history').then(r => setHistory(r.data.transactions));
+    api.get('/payments/admin-gcash').then(r => setAdminGcash(r.data)).catch(() => {});
     loadWithdrawals();
   }, []);
 
-  // Poll payment status while QR is displayed
-  useEffect(() => {
-    if (!qrPaymentId || qrPaid) return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/payments/status/${qrPaymentId}`);
-        if (data.status === 'completed') {
-          clearInterval(pollRef.current);
-          setQrPaid(true);
-          setQrCode(null);
-          toast.success(`₱${data.amount.toFixed(2)} credited to your balance!`);
-          refreshUser();
-          api.get('/payments/history').then(r => setHistory(r.data.transactions));
-        }
-      } catch {}
-    }, 4000);
-    return () => clearInterval(pollRef.current);
-  }, [qrPaymentId, qrPaid]);
-
-  const handleGenerateQR = async () => {
+  const handleDeposit = async () => {
     if (amount < 100) return toast.error('Minimum deposit is ₱100.');
-    setLoading(true);
-    setQrCode(null);
-    setQrPaid(false);
-    setQrPaymentId(null);
-    clearInterval(pollRef.current);
+    if (!gcashRef.trim()) return toast.error('Enter your GCash reference number.');
+    setDepLoading(true);
     try {
-      const { data } = await api.post('/payments/qrph-checkout', { amount });
-      setQrCode(data.qr_code);
-      setQrPaymentId(data.payment_id);
+      const { data } = await api.post('/payments/deposit', { amount, gcash_reference: gcashRef.trim() });
+      toast.success(data.message);
+      setGcashRef('');
+      api.get('/payments/history').then(r => setHistory(r.data.transactions));
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to generate QR. Try again.');
+      toast.error(err.response?.data?.message || 'Failed to submit. Try again.');
     } finally {
-      setLoading(false);
+      setDepLoading(false);
     }
   };
 
@@ -104,11 +82,6 @@ export default function Wallet() {
     }
   };
 
-  // PayMongo returns qr_code as a base64 PNG string
-  const qrSrc = qrCode
-    ? (qrCode.startsWith('data:') || qrCode.startsWith('http') ? qrCode : `data:image/png;base64,${qrCode}`)
-    : null;
-
   return (
     <div className="animate-fadeInUp">
 
@@ -128,12 +101,21 @@ export default function Wallet() {
 
       {/* ── Deposit ─────────────────────── */}
       <div style={card}>
-        <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 6 }}>📱 Deposit via QRPh</div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-          Scan with GCash, Maya, or any QRPh bank app. Balance is credited automatically.
+        <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 6 }}>� Cash In via GCash</div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+          Send GCash to the number below, then submit your reference number for admin approval.
         </div>
 
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 8 }}>Choose Amount</div>
+        {/* Admin GCash info */}
+        {adminGcash && (
+          <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '2px solid #86efac', borderRadius: 14, padding: '14px 16px', marginBottom: 16, textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#166534', fontWeight: 700, marginBottom: 4 }}>SEND GCASH TO</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: '#15803d', letterSpacing: 1 }}>{adminGcash.number}</div>
+            <div style={{ fontSize: 14, color: '#166534', fontWeight: 600, marginTop: 2 }}>{adminGcash.name}</div>
+          </div>
+        )}
+
+        <label style={lbl}>Choose Amount</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           {QUICK.map(a => (
             <button key={a}
@@ -144,36 +126,26 @@ export default function Wallet() {
                 color: amount === a ? '#1e40af' : '#374151',
                 fontWeight: 700, cursor: 'pointer', fontSize: 14,
               }}
-              onClick={() => { setAmount(a); setQrCode(null); setQrPaid(false); }}>₱{a}</button>
+              onClick={() => setAmount(a)}>₱{a}</button>
           ))}
         </div>
         <input style={inp} type="number" min={100} value={amount}
-          onChange={e => { setAmount(parseInt(e.target.value) || 100); setQrCode(null); setQrPaid(false); }} />
+          onChange={e => setAmount(parseInt(e.target.value) || 100)} />
 
-        {qrPaid ? (
-          <div style={{ textAlign: 'center', padding: '20px', background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', borderRadius: 14, border: '2px solid #86efac' }}>
-            <div style={{ fontSize: 44 }}>✅</div>
-            <div style={{ fontWeight: 900, color: '#166534', fontSize: 18, marginTop: 8 }}>Payment Received!</div>
-            <div style={{ color: '#166534', fontSize: 13, marginTop: 4 }}>Your balance has been updated.</div>
-            <button style={{ marginTop: 14, background: 'linear-gradient(90deg,#1e40af,#2563eb)', color: '#fff', border: 'none', borderRadius: 12, padding: '10px 24px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-              onClick={() => { setQrPaid(false); setQrCode(null); }}>Pay Again</button>
-          </div>
-        ) : qrSrc ? (
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>Scan to pay <b>₱{amount}</b></div>
-            <img src={qrSrc} alt="QRPh payment QR code" style={{ width: 220, height: 220, maxWidth: '100%', border: '4px solid #e2e8f0', borderRadius: 16, objectFit: 'contain' }} />
-            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>⏳ Waiting for payment…</div>
-            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Works with GCash, Maya, BPI, BDO &amp; all QRPh banks</div>
-            <button style={{ marginTop: 12, background: 'none', border: '1px solid #e2e8f0', borderRadius: 8, padding: '7px 16px', fontSize: 13, color: '#64748b', cursor: 'pointer', fontFamily: 'inherit' }}
-              onClick={() => { setQrCode(null); clearInterval(pollRef.current); }}>Cancel</button>
-          </div>
-        ) : (
-          <button
-            style={{ width: '100%', padding: 14, background: loading ? '#94a3b8' : 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer', boxShadow: loading ? 'none' : '0 4px 14px rgba(16,185,129,0.35)', fontFamily: 'inherit' }}
-            disabled={loading} onClick={handleGenerateQR}>
-            {loading ? 'Generating QR…' : `Generate QR for ₱${amount}`}
-          </button>
-        )}
+        <label style={lbl}>GCash Reference Number</label>
+        <input style={{ ...inp, marginBottom: 14 }} type="text"
+          placeholder="e.g. 1234567890"
+          value={gcashRef} onChange={e => setGcashRef(e.target.value)} />
+
+        <button
+          style={{ width: '100%', padding: 14, background: depLoading ? '#94a3b8' : 'linear-gradient(90deg,#10b981,#059669)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: depLoading ? 'not-allowed' : 'pointer', boxShadow: depLoading ? 'none' : '0 4px 14px rgba(16,185,129,0.35)', fontFamily: 'inherit' }}
+          disabled={depLoading} onClick={handleDeposit}>
+          {depLoading ? 'Submitting…' : `Submit ₱${amount} Deposit`}
+        </button>
+
+        <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 10 }}>
+          ⏳ Admin will verify and credit your balance shortly.
+        </div>
       </div>
 
       {/* ── Withdraw ─────────────────────── */}
