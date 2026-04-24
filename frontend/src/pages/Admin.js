@@ -36,6 +36,8 @@ export default function Admin() {
   const [numSearch, setNumSearch]   = useState('');
   const [sortBy, setSortBy]         = useState('total');
   const [winners, setWinners]       = useState({});
+  const [tallyPage, setTallyPage]   = useState('0'); // first digit 0-9
+  const [showAll, setShowAll]       = useState(false); // toggle all 1000 vs bets-only
 
   // Winners payout section
   const [payoutDate, setPayoutDate]     = useState(new Date().toISOString().slice(0, 10));
@@ -231,18 +233,37 @@ export default function Admin() {
   const payout = (row) =>
     (row.straightAmt / 10) * STRAIGHT_PAYOUT + (row.ramboAmt / 10) * RAMBOLITO_PAYOUT;
 
+  // All 1000 combinations merged with actual bets
+  const all1000 = useMemo(() => {
+    const list = [];
+    for (let i = 0; i <= 999; i++) {
+      const d1 = Math.floor(i / 100);
+      const d2 = Math.floor((i % 100) / 10);
+      const d3 = i % 10;
+      const key = `${d1}-${d2}-${d3}`;
+      const bet = grouped[key];
+      list.push(bet ? bet : { numbers: key, straightAmt: 0, ramboAmt: 0, total: 0, bettors: [] });
+    }
+    return list;
+  }, [grouped]);
+
   // Filter + sort
   const rows = useMemo(() => {
-    let list = Object.values(grouped);
+    let list = showAll ? all1000 : Object.values(grouped);
     if (numSearch.trim()) {
       const q = numSearch.trim().replace(/\s+/g, '-');
-      list = list.filter(r => r.numbers.includes(q));
+      // Allow plain 3-digit input like '153'
+      const plain = q.replace(/-/g, '');
+      list = list.filter(r => r.numbers.includes(q) || r.numbers.replace(/-/g, '').includes(plain));
+    } else if (showAll) {
+      // When showing all 1000, filter by selected first digit page
+      list = list.filter(r => r.numbers.startsWith(tallyPage + '-'));
     }
     if (sortBy === 'number') list.sort((a, b) => a.numbers.localeCompare(b.numbers));
     else if (sortBy === 'payout') list.sort((a, b) => payout(b) - payout(a));
     else list.sort((a, b) => b.total - a.total);
     return list;
-  }, [grouped, numSearch, sortBy]);
+  }, [grouped, all1000, numSearch, sortBy, showAll, tallyPage]);
 
   const totalCollected   = tabBets.reduce((s, b) => s + parseFloat(b.amount), 0);
   const totalPayoutRisk  = rows.reduce((s, r) => s + payout(r), 0);
@@ -290,7 +311,7 @@ export default function Admin() {
         </div>
 
         {/* Draw time tabs */}
-        <div className="admin-tab-bar" style={{ display: 'flex', gap: 4, borderBottom: '2px solid #e2e8f0' }}>
+        <div className="admin-tab-bar" style={{ display: 'flex', gap: 4, borderBottom: '2px solid #e2e8f0', flexWrap: 'wrap' }}>
           {DRAW_TIMES.map(t => (
             <button key={t} style={S.tab(activeTab === t)} onClick={() => { setActiveTab(t); setExpanded(null); setNumSearch(''); }}>
               {t}
@@ -300,14 +321,42 @@ export default function Admin() {
                 </span>}
             </button>
           ))}
+          <button
+            style={{ ...S.tab(showAll), marginLeft: 'auto' }}
+            onClick={() => { setShowAll(v => !v); setNumSearch(''); setTallyPage('0'); }}>
+            {showAll ? '📊 All 1000' : '📊 All 1000'}
+          </button>
         </div>
+
+        {/* First-digit page tabs (only when showAll is active) */}
+        {showAll && !numSearch.trim() && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', padding: '8px 0 4px', borderBottom: '1px solid #e2e8f0' }}>
+            {Array.from({ length: 10 }, (_, d) => String(d)).map(d => {
+              const hasBets = all1000.some(r => r.numbers.startsWith(d + '-') && r.total > 0);
+              return (
+                <button key={d} onClick={() => setTallyPage(d)}
+                  style={{
+                    padding: '5px 12px', border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 14,
+                    borderRadius: 8, fontFamily: 'inherit',
+                    background: tallyPage === d ? '#1e40af' : hasBets ? '#dbeafe' : '#f1f5f9',
+                    color: tallyPage === d ? '#fff' : hasBets ? '#1d4ed8' : '#94a3b8',
+                  }}>
+                  {d}__
+                  {hasBets && <span style={{ marginLeft: 3, fontSize: 10, background: tallyPage === d ? 'rgba(255,255,255,0.3)' : '#1e40af', color: '#fff', borderRadius: 8, padding: '0 5px' }}>
+                    {all1000.filter(r => r.numbers.startsWith(d + '-') && r.total > 0).length}
+                  </span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div style={{ background: '#f8faff', borderRadius: '0 0 12px 12px', padding: 14 }}>
           {/* Summary totals */}
           {tabBets.length > 0 && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               {[
-                ['Unique Numbers', rows.length, '#1e40af'],
+                ['Unique Numbers', Object.keys(grouped).length, '#1e40af'],
                 ['Total Bets', tabBets.length, '#1e40af'],
                 ['Collected', `₱${totalCollected.toFixed(2)}`, '#16a34a'],
                 ['Max Payout Risk', `₱${totalPayoutRisk.toLocaleString()}`, riskColor(totalPayoutRisk)],
@@ -338,7 +387,7 @@ export default function Admin() {
             </div>
           )}
 
-          {tabBets.length === 0 ? (
+          {!showAll && tabBets.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 30, color: '#94a3b8', fontSize: 15 }}>
               No bets for {activeTab} on {drawDate}. Pick a date and click Load.
             </div>
@@ -489,9 +538,9 @@ export default function Admin() {
 
               {/* Grand total row */}
               <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 110px 110px 28px', background: '#1e40af', color: '#fff', padding: '12px 14px', gap: 8, alignItems: 'center', fontWeight: 800 }}>
-                <span style={{ fontSize: 13 }}>TOTAL ({rows.length})</span>
-                <span style={{ textAlign: 'right', fontSize: 13 }}>₱{rows.reduce((s, r) => s + r.straightAmt, 0).toFixed(2)}</span>
-                <span style={{ textAlign: 'right', fontSize: 13 }}>₱{rows.reduce((s, r) => s + r.ramboAmt, 0).toFixed(2)}</span>
+                <span style={{ fontSize: 13 }}>TOTAL ({Object.keys(grouped).length})</span>
+                <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.straightAmt, 0).toFixed(2)}</span>
+                <span style={{ textAlign: 'right', fontSize: 13 }}>₱{Object.values(grouped).reduce((s, r) => s + r.ramboAmt, 0).toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 15, color: '#86efac' }}>₱{totalCollected.toFixed(2)}</span>
                 <span style={{ textAlign: 'right', fontSize: 13, color: '#fca5a5' }}>₱{totalPayoutRisk.toLocaleString()}</span>
                 <span></span>
