@@ -494,7 +494,7 @@ export default function Admin() {
                       <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: riskColor(p), cursor: 'pointer' }} onClick={() => handleExpand(row.numbers)}>₱{p.toLocaleString()}</div>
 
                       {/* LIMIT cell */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={e => e.stopPropagation()}>
                         <input
                           type="number" min="0" step="10"
                           placeholder="Limit"
