@@ -59,9 +59,9 @@ exports.createGcashCheckout = async (req, res) => {
             failed:  `${appUrl}/payment-result?success=false&payment_id=${payment.id}`,
           },
           billing: {
-            name:  user.name,
-            phone: user.phone,
-            email: user.email || `${user.phone.replace(/\D/g, '')}@swertres.app`,
+            name:  user.name || 'Swertres User',
+            phone: user.phone || '',
+            email: user.email || ((user.phone || '').replace(/\D/g, '') ? `${(user.phone || '').replace(/\D/g, '')}@swertres.app` : `user${user.id}@swertres.app`),
           },
           type:     'gcash',
           currency: 'PHP',
@@ -167,14 +167,16 @@ exports.createQrphCheckout = async (req, res) => {
     const pi = piRes.data.data;
 
     // Step 2: Create Payment Method
+    const phoneDigits = (user.phone || '').replace(/\D/g, '');
+    const billingEmail = user.email || (phoneDigits ? `${phoneDigits}@swertres.app` : `user${user.id}@swertres.app`);
     const pmRes = await axios.post(`${PM_BASE}/payment_methods`, {
       data: {
         attributes: {
           type: 'qrph',
           billing: {
-            name:  user.name,
-            phone: user.phone,
-            email: user.email || `${user.phone.replace(/\D/g, '')}@swertres.app`,
+            name:  user.name || 'Swertres User',
+            phone: user.phone || '',
+            email: billingEmail,
           },
         },
       },
