@@ -65,6 +65,9 @@ export default function Admin() {
   const [withdrawals, setWithdrawals]     = useState([]);
   const [wdFilter, setWdFilter]           = useState('pending');
   const [wdNote, setWdNote]               = useState({});
+  const [wdModal, setWdModal]             = useState(null); // withdrawal object being processed
+  const [wdRef, setWdRef]                 = useState('');   // GCash ref number admin inputs
+  const [wdProcessing, setWdProcessing]   = useState(false);
 
   // Deposits
   const [deposits, setDeposits]     = useState([]);
@@ -253,10 +256,27 @@ export default function Admin() {
     api.get(`/admin/withdrawals?status=${s}`).then(r => setWithdrawals(r.data.withdrawals || []));
   };
 
-  const processWithdrawal = async (id, action) => {
+  const openWdModal = (w) => { setWdModal(w); setWdRef(''); };
+  const closeWdModal = () => { setWdModal(null); setWdRef(''); };
+
+  const confirmWithdrawal = async () => {
+    if (!wdRef.trim()) return toast.error('Enter the GCash reference number you sent.');
+    setWdProcessing(true);
     try {
-      await api.patch(`/admin/withdrawals/${id}`, { action, note: wdNote[id] || '' });
-      toast.success(`Withdrawal ${action}.`);
+      const note = `GCash ref: ${wdRef.trim()}${wdNote[wdModal.id] ? ' — ' + wdNote[wdModal.id] : ''}`;
+      await api.patch(`/admin/withdrawals/${wdModal.id}`, { action: 'approved', note });
+      toast.success('Withdrawal approved and recorded!');
+      closeWdModal();
+      loadWithdrawals();
+      loadStats();
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
+    finally { setWdProcessing(false); }
+  };
+
+  const rejectWithdrawal = async (id) => {
+    try {
+      await api.patch(`/admin/withdrawals/${id}`, { action: 'rejected', note: wdNote[id] || '' });
+      toast.success('Withdrawal rejected.');
       loadWithdrawals();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
   };
@@ -1116,14 +1136,14 @@ export default function Admin() {
                 <div>
                   {w.status === 'pending' ? (
                     <div style={{ display: 'flex', gap: 4, flexDirection: 'column' }}>
-                      <input placeholder="Note (optional)" value={wdNote[w.id] || ''} onChange={e => setWdNote(n => ({ ...n, [w.id]: e.target.value }))}
+                      <input placeholder="Rejection note (optional)" value={wdNote[w.id] || ''} onChange={e => setWdNote(n => ({ ...n, [w.id]: e.target.value }))}
                         style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12, width: '100%', fontFamily: 'inherit' }} />
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={() => processWithdrawal(w.id, 'approved')}
+                        <button onClick={() => openWdModal(w)}
                           style={{ flex: 1, padding: '6px 4px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
                           ✓ Approve
                         </button>
-                        <button onClick={() => processWithdrawal(w.id, 'rejected')}
+                        <button onClick={() => rejectWithdrawal(w.id)}
                           style={{ flex: 1, padding: '6px 4px', borderRadius: 8, border: 'none', background: '#fee2e2', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
                           ✗ Reject
                         </button>
@@ -1211,6 +1231,67 @@ export default function Admin() {
           </div>
         )}
       </div>
+
+      {/* Withdrawal Approval Modal */}
+      {wdModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={e => { if (e.target === e.currentTarget) closeWdModal(); }}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 4 }}>💸 Confirm Withdrawal</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Send the GCash payment first, then enter the reference number below.</div>
+
+            {/* GCash send details */}
+            <div style={{ background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 14, padding: 16, marginBottom: 18 }}>
+              <div style={{ fontSize: 12, color: '#166534', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Send via GCash</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: '#374151' }}>Amount</span>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>₱{parseFloat(wdModal.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 13, color: '#374151' }}>GCash Name</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{wdModal.gcash_name}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(wdModal.gcash_name); toast.success('Copied!'); }}
+                    style={{ padding: '2px 8px', fontSize: 11, background: '#e0f2fe', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#0369a1', fontWeight: 700, fontFamily: 'inherit' }}>Copy</button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: '#374151' }}>GCash Number</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{wdModal.gcash_number}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(wdModal.gcash_number); toast.success('Copied!'); }}
+                    style={{ padding: '2px 8px', fontSize: 11, background: '#e0f2fe', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#0369a1', fontWeight: 700, fontFamily: 'inherit' }}>Copy</button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>GCash Reference Number <span style={{ color: '#dc2626' }}>*</span></div>
+            <input
+              value={wdRef}
+              onChange={e => setWdRef(e.target.value)}
+              placeholder="e.g. 12345678901234"
+              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 14 }}
+            />
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Note (optional)</div>
+            <input
+              value={wdNote[wdModal.id] || ''}
+              onChange={e => setWdNote(n => ({ ...n, [wdModal.id]: e.target.value }))}
+              placeholder="Any remarks…"
+              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 20 }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={closeWdModal}
+                style={{ flex: 1, padding: 12, borderRadius: 12, border: '1.5px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>
+                Cancel
+              </button>
+              <button onClick={confirmWithdrawal} disabled={wdProcessing}
+                style={{ flex: 2, padding: 12, borderRadius: 12, border: 'none', background: wdProcessing ? '#94a3b8' : '#16a34a', color: '#fff', fontWeight: 800, cursor: wdProcessing ? 'not-allowed' : 'pointer', fontFamily: 'inherit', fontSize: 14 }}>
+                {wdProcessing ? 'Processing…' : '✓ Confirm & Mark Approved'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
