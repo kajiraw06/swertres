@@ -11,12 +11,9 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-// GET /api/payments/admin-gcash  (public — no auth needed)
+// GET /api/payments/admin-gcash  (disabled — number/name are private)
 exports.getAdminGcash = (req, res) => {
-  res.json({
-    number: process.env.ADMIN_GCASH_NUMBER || '09XXXXXXXXX',
-    name:   process.env.ADMIN_GCASH_NAME   || 'Swertres Admin',
-  });
+  res.status(404).json({ message: 'Not found.' });
 };
 
 // GET /api/pay/:token  (PUBLIC — serves GCash redirect page)
@@ -26,8 +23,7 @@ exports.handleGcashPayLink = (req, res) => {
     return res.status(410).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Expired</title><style>body{font-family:sans-serif;text-align:center;padding:40px;background:#fef2f2}h2{color:#991b1b}p{color:#6b7280}</style></head><body><h2>\u274C Link Expired</h2><p>This QR code has expired. Please generate a new one in the app.</p></body></html>`);
   }
 
-  const { gcashNumber, gcashName, amount } = record;
-  const masked = gcashNumber.replace(/^(09\d{2})\d{5}(\d{2})$/, '$1XXXXX$2');
+  const { gcashNumber, amount } = record;
   const deepLink = `gcash://send?to=${gcashNumber}&amount=${Math.round(amount)}`;
   const formatted = parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 });
 
@@ -45,12 +41,7 @@ exports.handleGcashPayLink = (req, res) => {
     h1{font-size:20px;color:#065f46;font-weight:900;margin-bottom:4px}
     .sub{color:#9ca3af;font-size:13px;margin-bottom:24px}
     .amount{font-size:46px;font-weight:900;color:#059669;letter-spacing:-1px;margin-bottom:4px}
-    .amt-label{font-size:13px;color:#9ca3af;margin-bottom:20px}
-    .info{background:#f0fdf4;border:1.5px solid #86efac;border-radius:14px;padding:16px 18px;margin-bottom:24px;text-align:left}
-    .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:14px}
-    .row:last-child{margin-bottom:0}
-    .row-label{color:#6b7280}
-    .row-val{font-weight:800;color:#065f46}
+    .amt-label{font-size:13px;color:#9ca3af;margin-bottom:24px}
     .btn{display:block;width:100%;padding:18px;background:linear-gradient(90deg,#059669,#10b981);color:#fff;border:none;border-radius:16px;font-size:18px;font-weight:900;cursor:pointer;text-decoration:none;margin-bottom:16px;box-shadow:0 4px 16px rgba(5,150,105,0.4)}
     ol{text-align:left;font-size:13px;color:#374151;padding-left:20px;line-height:1.8;margin-bottom:16px}
     .note{font-size:12px;color:#d1d5db;margin-top:8px}
@@ -64,11 +55,6 @@ exports.handleGcashPayLink = (req, res) => {
     <p class="sub">Send via GCash</p>
     <div class="amount">\u20B1${formatted}</div>
     <p class="amt-label">Send EXACTLY this amount</p>
-    <div class="info">
-      <div class="row"><span class="row-label">Send to</span><span class="row-val">${gcashName}</span></div>
-      <div class="row"><span class="row-label">Number</span><span class="row-val">${masked}</span></div>
-      <div class="row"><span class="row-label">Amount</span><span class="row-val">\u20B1${formatted}</span></div>
-    </div>
     <a class="btn" href="${deepLink}" id="openBtn">\uD83D\uDCF1 Open GCash App</a>
     <ol>
       <li>Tap <strong>Open GCash App</strong> above</li>
@@ -80,7 +66,6 @@ exports.handleGcashPayLink = (req, res) => {
     <p class="note">\u23F0 This link expires 30 minutes after QR was generated</p>
   </div>
   <script>
-    // Auto-attempt GCash deep link on mobile
     if (/android|iphone|ipad/i.test(navigator.userAgent)) {
       setTimeout(() => { window.location.href = '${deepLink}'; }, 600);
     }
