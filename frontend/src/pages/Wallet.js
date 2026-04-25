@@ -119,7 +119,7 @@ export default function Wallet() {
       <div style={card}>
         <div style={{ fontSize: 20, fontWeight: 900, color: '#059669', marginBottom: 6 }}>💚 Deposit via GCash</div>
         <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-          Scan the QR with your GCash app to get the number, send money, then submit your reference number here.
+          Scan the QR with your <b>phone camera</b> (not the GCash app scanner), tap the link, then press <b>Open GCash App</b>.
         </div>
 
         <label style={lbl}>Choose Amount</label>
@@ -154,7 +154,7 @@ export default function Wallet() {
             </div>
             <img src={gcashQr} alt="GCash QR" style={{ width: 220, height: 220, maxWidth: '100%', border: '4px solid #bbf7d0', borderRadius: 16, objectFit: 'contain' }} />
             <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>
-              📱 Scan this QR with any QR scanner to get the GCash number, then open GCash → Send Money
+              � Scan with your <b>phone camera</b> — do <b>NOT</b> use the GCash app scanner
             </div>
 
             <div style={{ marginTop: 16, textAlign: 'left' }}>
