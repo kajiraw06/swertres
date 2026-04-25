@@ -96,11 +96,9 @@ exports.createGcashLink = async (req, res) => {
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
 
-    const baseUrl = process.env.BACKEND_URL || 'https://swertres-backend.fly.dev';
-    const payUrl  = `${baseUrl}/api/payments/pay/${token}`;
-
-    // QR encodes a URL — phone number is never in the QR
-    const qrImage = await QRCode.toDataURL(payUrl, {
+    // QR encodes the GCash deep link directly — opens GCash app on scan
+    const deepLink = `gcash://send?to=${gcashNumber}&amount=${Math.round(amount)}`;
+    const qrImage = await QRCode.toDataURL(deepLink, {
       width:  300,
       margin: 2,
       color:  { dark: '#065f46', light: '#ffffff' },
