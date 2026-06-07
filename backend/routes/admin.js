@@ -53,4 +53,7 @@ router.post('/cash-bets',
   ctrl.placeCashBets
 );
 
+// Handwritten slip OCR via Google Cloud Vision API
+router.post('/scan-slip', ctrl.scanSlip);
+
 module.exports = router;

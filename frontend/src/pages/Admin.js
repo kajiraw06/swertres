@@ -370,13 +370,32 @@ export default function Admin() {
     setScanProgress(0);
     setScanBets([]);
     try {
-      // ── Preprocess: upscale → grayscale → Otsu auto-threshold → 3×3 dilation ──
+      // ── Step 1: try Google Cloud Vision API (server-side, handles handwriting perfectly) ──
+      let cloudText = null;
+      try {
+        const base64 = imageDataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
+        setScanProgress(20);
+        const { data } = await api.post('/admin/scan-slip', { image: base64 });
+        cloudText = data.text || null;
+      } catch (err) {
+        if (err.response?.status !== 503) throw err; // 503 = not configured, fall through to Tesseract
+      }
+
+      if (cloudText !== null) {
+        setScanProgress(100);
+        const extracted = parseBetText(cloudText);
+        setScanBets(extracted);
+        if (extracted.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
+        else toast.success(`${extracted.length} bet(s) detected — review before submitting.`);
+        return;
+      }
+
+      // ── Step 2: fallback — local Tesseract (printed text only, less accurate for handwriting) ──
       const processedDataUrl = await new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          // Keep the longest side at ~1500px: downscale large phone photos,
-          // upscale only tiny images (max 2×). This prevents out-of-memory crashes.
+          // Keep longest side ≤ 1500px — downscale phone photos, upscale tiny images (max 2×)
           const maxDim = Math.max(img.width, img.height);
           const scale = maxDim > 1500 ? 1500 / maxDim : Math.min(2, 1500 / maxDim);
           const W = Math.round(img.width  * scale);
@@ -388,55 +407,21 @@ export default function Admin() {
           ctx.fillRect(0, 0, W, H);
           ctx.drawImage(img, 0, 0, W, H);
 
+          // Grayscale + contrast stretch (no binary threshold — preserves detail for LSTM)
           const imgData = ctx.getImageData(0, 0, W, H);
           const d = imgData.data;
-
-          // Step 1 – convert to grayscale
-          const gray = new Uint8Array(W * H);
+          let lo = 255, hi = 0;
           for (let i = 0; i < d.length; i += 4) {
-            gray[i >> 2] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+            const g = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+            if (g < lo) lo = g;
+            if (g > hi) hi = g;
+            d[i >> 2 << 2]     = g; // reuse slot temporarily
           }
-
-          // Step 2 – Otsu's method: find the threshold that maximises between-class variance
-          const hist = new Int32Array(256);
-          for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
-          const total = gray.length;
-          let sum = 0;
-          for (let i = 0; i < 256; i++) sum += i * hist[i];
-          let sumB = 0, wB = 0, maxVar = 0, thresh = 128;
-          for (let t = 0; t < 256; t++) {
-            wB += hist[t];
-            if (!wB) continue;
-            const wF = total - wB;
-            if (!wF) break;
-            sumB += t * hist[t];
-            const mB = sumB / wB;
-            const mF = (sum - sumB) / wF;
-            const v = wB * wF * (mB - mF) ** 2;
-            if (v > maxVar) { maxVar = v; thresh = t; }
-          }
-
-          // Step 3 – binarise: ink → 0 (black), background → 255 (white)
-          const bin = new Uint8Array(W * H);
-          for (let i = 0; i < gray.length; i++) bin[i] = gray[i] <= thresh ? 0 : 255;
-
-          // Step 4 – 3×3 morphological dilation to thicken thin handwritten strokes
-          const dilated = new Uint8Array(W * H).fill(255);
-          for (let y = 1; y < H - 1; y++) {
-            for (let x = 1; x < W - 1; x++) {
-              if (
-                bin[(y - 1) * W + (x - 1)] === 0 || bin[(y - 1) * W + x] === 0 || bin[(y - 1) * W + (x + 1)] === 0 ||
-                bin[ y      * W + (x - 1)] === 0 || bin[ y      * W + x] === 0 || bin[ y      * W + (x + 1)] === 0 ||
-                bin[(y + 1) * W + (x - 1)] === 0 || bin[(y + 1) * W + x] === 0 || bin[(y + 1) * W + (x + 1)] === 0
-              ) dilated[y * W + x] = 0;
-            }
-          }
-
-          // Step 5 – write processed pixels back
-          for (let i = 0; i < dilated.length; i++) {
-            const v = dilated[i];
-            d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v;
-            d[i * 4 + 3] = 255;
+          const range = hi - lo || 1;
+          for (let i = 0; i < d.length; i += 4) {
+            const g = Math.round(((d[i] - lo) / range) * 255);
+            d[i] = d[i + 1] = d[i + 2] = g;
+            d[i + 3] = 255;
           }
           ctx.putImageData(imgData, 0, 0);
           resolve(canvas.toDataURL('image/png'));
@@ -445,41 +430,20 @@ export default function Admin() {
       });
 
       const { createWorker } = await import('tesseract.js');
-
-      // Helper: run one Tesseract pass with a given PSM mode
-      const recognize = async (psm, progressOffset) => {
-        const w = await createWorker('eng', 1, {
-          logger: m => {
-            if (m.status === 'recognizing text')
-              setScanProgress(progressOffset + Math.round(m.progress * 50));
-          },
-        });
-        await w.setParameters({
-          tessedit_char_whitelist: '0123456789- \n',
-          tessedit_pageseg_mode:   String(psm),
-        });
-        const { data: { text } } = await w.recognize(processedDataUrl);
-        await w.terminate();
-        return text;
-      };
-
-      // Dual-pass: PSM 6 (uniform block) then PSM 11 (sparse text) — run sequentially to stay within mobile memory limits
-      const text6  = await recognize(6, 0);
-      const text11 = await recognize(11, 50);
+      const worker = await createWorker('eng', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') setScanProgress(30 + Math.round(m.progress * 70));
+        },
+      });
+      await worker.setParameters({ tessedit_pageseg_mode: '6' });
+      const { data: { text } } = await worker.recognize(processedDataUrl);
+      await worker.terminate();
       setScanProgress(100);
 
-      const bets6  = parseBetText(text6);
-      const bets11 = parseBetText(text11);
-
-      // Merge results; PSM 6 takes priority, PSM 11 fills in anything it caught that PSM 6 missed
-      const merged = [...bets6];
-      for (const b of bets11) {
-        if (!merged.some(x => x.numbers === b.numbers && x.amount === b.amount)) merged.push(b);
-      }
-
-      setScanBets(merged);
-      if (merged.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
-      else toast.success(`${merged.length} bet(s) detected — review before submitting.`);
+      const extracted = parseBetText(text);
+      setScanBets(extracted);
+      if (extracted.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
+      else toast.success(`${extracted.length} bet(s) detected — review before submitting.`);
     } catch (err) {
       console.error('OCR error:', err);
       toast.error('OCR failed. Try a clearer image.');

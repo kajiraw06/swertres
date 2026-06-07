@@ -492,3 +492,34 @@ exports.placeCashBets = async (req, res) => {
   }
 };
 
+// OCR: use Google Cloud Vision API (DOCUMENT_TEXT_DETECTION) to read handwritten bet slips.
+// Requires GOOGLE_VISION_API_KEY env var.  Returns 503 if not configured so the
+// frontend can fall back to local Tesseract.
+exports.scanSlip = async (req, res) => {
+  const apiKey = process.env.GOOGLE_VISION_API_KEY;
+  if (!apiKey) return res.status(503).json({ message: 'Vision API not configured.' });
+
+  const { image } = req.body; // base64-encoded image (no data-URL prefix)
+  if (!image) return res.status(400).json({ message: 'image is required.' });
+
+  try {
+    const axios = require('axios');
+    const { data } = await axios.post(
+      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
+      {
+        requests: [{
+          image:    { content: image },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+        }],
+      },
+      { timeout: 15000 }
+    );
+
+    const text = data.responses?.[0]?.fullTextAnnotation?.text || '';
+    return res.json({ text });
+  } catch (err) {
+    console.error('Vision API error:', err.response?.data || err.message);
+    return res.status(502).json({ message: 'Vision API request failed.' });
+  }
+};
+
