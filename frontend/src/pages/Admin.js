@@ -331,35 +331,36 @@ export default function Admin() {
 
   // ── OCR / Scan Slip helpers ──────────────────────────────
   const parseBetText = useCallback((rawText) => {
-    // Normalize common OCR misreads for digits (expanded set)
-    const norm = rawText
-      .replace(/[lI|!]/g, '1')
-      .replace(/[oO@]/g, '0')
+    console.log('[OCR] Raw Vision text:\n', rawText); // helpful for debugging misreads
+
+    // Normalize dashes — Vision sometimes returns em/en dash instead of hyphen
+    let norm = rawText.replace(/[—–−]/g, '-');
+
+    // Normalize common OCR misreads for digits (expanded)
+    norm = norm
+      .replace(/[lI|!i]/g, '1')
+      .replace(/[oO@QD]/g, '0')
       .replace(/[sS$]/g, '5')
       .replace(/[bB]/g, '8')
-      .replace(/[gG&]/g, '9')
+      .replace(/[gGq&]/g, '9')
       .replace(/[zZ]/g, '2')
-      .replace(/[A]/g, '4')
+      .replace(/[Ah]/g, '4')
       .replace(/[T]/g, '7')
       .replace(/[Ee]/g, '6');
 
+    // Use matchAll (global) so we find ALL bets even if Vision puts them on the same line
+    const pattern = /(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]+\s*(\d+)/g;
     const seen = new Set();
     const bets = [];
-    for (const line of norm.split('\n')) {
-      const t = line.trim();
-      if (!t) continue;
-      // Match 3 digits (optionally separated by dashes/spaces/dots) then separator, then amount.
-      // Handles: "908 - 20", "9-0-8 20", "123 20", "9 0 8 - 20", "9.0.8-20"
-      const m = t.match(/(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]+\s*(\d+)/);
-      if (m) {
-        const [, a, b, c, amt] = m;
-        const amount = parseInt(amt, 10);
-        const numbers = `${a}-${b}-${c}`;
-        const key = `${numbers}:${amount}`;
-        if (amount >= 5 && amount <= 50000 && !seen.has(key)) {
-          seen.add(key);
-          bets.push({ numbers, amount, bet_type: 'straight' });
-        }
+
+    for (const m of norm.matchAll(pattern)) {
+      const [, a, b, c, amt] = m;
+      const amount = parseInt(amt, 10);
+      const numbers = `${a}-${b}-${c}`;
+      const key = `${numbers}:${amount}`;
+      if (amount >= 5 && amount <= 50000 && !seen.has(key)) {
+        seen.add(key);
+        bets.push({ numbers, amount, bet_type: 'straight' });
       }
     }
     return bets;
