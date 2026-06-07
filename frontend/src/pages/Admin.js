@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 
@@ -25,6 +25,8 @@ function Num({ numbers }) {
 
 export default function Admin() {
   const [stats, setStats]           = useState({});
+  const [earnings, setEarnings]     = useState(null);
+  const [earningsPeriod, setEarningsPeriod] = useState('today');
   const [users, setUsers]           = useState([]);
   const [search, setSearch]         = useState('');
   const [creditUser, setCreditUser] = useState(null);
@@ -66,7 +68,6 @@ export default function Admin() {
   const [wdFilter, setWdFilter]           = useState('pending');
   const [wdNote, setWdNote]               = useState({});
   const [wdModal, setWdModal]             = useState(null); // withdrawal object being processed
-  const [wdRef, setWdRef]                 = useState('');   // GCash ref number admin inputs
   const [wdProcessing, setWdProcessing]   = useState(false);
 
   // Deposits
@@ -79,6 +80,16 @@ export default function Admin() {
   const alertIdRef                  = React.useRef(0);
   const prevPendingWd               = React.useRef(null);
   const prevPendingDep              = React.useRef(null);
+
+  // Scan Slip (OCR)
+  const [scanImage, setScanImage]         = useState(null);   // data URL
+  const [scanProcessing, setScanProcessing] = useState(false);
+  const [scanProgress, setScanProgress]   = useState(0);
+  const [scanBets, setScanBets]           = useState([]);     // extracted bets for review
+  const [scanDrawDate, setScanDrawDate]   = useState(new Date().toISOString().slice(0, 10));
+  const [scanDrawTime, setScanDrawTime]   = useState('2PM');
+  const [scanSubmitting, setScanSubmitting] = useState(false);
+  const scanFileRef                       = useRef(null);
 
   const pushAlert = (type, message) => {
     const id = ++alertIdRef.current;
@@ -139,6 +150,7 @@ export default function Admin() {
   };
 
   const loadStats = () => api.get('/admin/dashboard').then(r => setStats(r.data));
+  const loadEarnings = (p = earningsPeriod) => api.get(`/admin/earnings?period=${p}`).then(r => setEarnings(r.data)).catch(() => {});
 
   // Poll every 30s for new pending withdrawals/deposits
   useEffect(() => {
@@ -173,11 +185,12 @@ export default function Admin() {
 
   useEffect(() => {
     loadStats();
+    loadEarnings('today');
     api.get('/admin/users').then(r => setUsers(r.data.users || []));
     api.get(`/admin/bets?draw_date=${drawDate}&limit=500`).then(r => setAllBets(r.data.bets || []));
     api.get('/admin/bet-limits').then(r => setLimits(r.data.limits || []));
     // Auto-refresh stats every 60 seconds
-    const interval = setInterval(loadStats, 60000);
+    const interval = setInterval(() => { loadStats(); loadEarnings(); }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -256,14 +269,13 @@ export default function Admin() {
     api.get(`/admin/withdrawals?status=${s}`).then(r => setWithdrawals(r.data.withdrawals || []));
   };
 
-  const openWdModal = (w) => { setWdModal(w); setWdRef(''); };
-  const closeWdModal = () => { setWdModal(null); setWdRef(''); };
+  const openWdModal = (w) => { setWdModal(w); };
+  const closeWdModal = () => { setWdModal(null); };
 
   const confirmWithdrawal = async () => {
-    if (!wdRef.trim()) return toast.error('Enter the GCash reference number you sent.');
     setWdProcessing(true);
     try {
-      const note = `GCash ref: ${wdRef.trim()}${wdNote[wdModal.id] ? ' — ' + wdNote[wdModal.id] : ''}`;
+      const note = wdNote[wdModal.id] || '';
       await api.patch(`/admin/withdrawals/${wdModal.id}`, { action: 'approved', note });
       toast.success('Withdrawal approved and recorded!');
       closeWdModal();
@@ -315,6 +327,110 @@ export default function Admin() {
     await api.delete(`/admin/bet-limits/${id}`);
     setLimits(prev => prev.filter(l => l.id !== id));
     toast.success('Limit removed.');
+  };
+
+  // ── OCR / Scan Slip helpers ──────────────────────────────
+  const parseBetText = useCallback((rawText) => {
+    // Normalize common OCR misreads for digits
+    const norm = rawText
+      .replace(/[lI|]/g, '1')
+      .replace(/\b[oO]\b/g, '0')
+      .replace(/[sS]/g, '5');
+
+    const bets = [];
+    for (const line of norm.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      // Match: 3 single digits (with optional dash/space separators) then whitespace then an amount
+      // e.g. "1-2-3 20", "1 2 3 20", "123 20"
+      const m = t.match(/^(\d)\s*[-\s]?\s*(\d)\s*[-\s]?\s*(\d)\s+(\d+)/);
+      if (m) {
+        const [, a, b, c, amt] = m;
+        const amount = parseInt(amt, 10);
+        if (amount >= 5 && amount <= 50000) {
+          bets.push({ numbers: `${a}-${b}-${c}`, amount, bet_type: 'straight' });
+        }
+      }
+    }
+    return bets;
+  }, []);
+
+  const runOcr = useCallback(async (imageDataUrl) => {
+    setScanProcessing(true);
+    setScanProgress(0);
+    setScanBets([]);
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') setScanProgress(Math.round(m.progress * 100));
+        },
+      });
+      // Restrict to digits, dash, and space only — greatly improves accuracy for number slips
+      await worker.setParameters({ tessedit_char_whitelist: '0123456789- \n' });
+      const { data: { text } } = await worker.recognize(imageDataUrl);
+      await worker.terminate();
+      const extracted = parseBetText(text);
+      setScanBets(extracted);
+      if (extracted.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
+      else toast.success(`${extracted.length} bet(s) detected — review before submitting.`);
+    } catch (err) {
+      console.error('OCR error:', err);
+      toast.error('OCR failed. Try a clearer image.');
+    } finally {
+      setScanProcessing(false);
+      setScanProgress(0);
+    }
+  }, [parseBetText]);
+
+  const handleScanFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setScanImage(ev.target.result);
+      runOcr(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const updateScanBet = (idx, field, value) => {
+    setScanBets(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+  };
+
+  const addScanBetRow = () => {
+    setScanBets(prev => [...prev, { numbers: '', amount: 20, bet_type: 'straight' }]);
+  };
+
+  const removeScanBet = (idx) => {
+    setScanBets(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const submitCashBets = async () => {
+    if (scanBets.length === 0) return toast.error('No bets to submit.');
+    for (const b of scanBets) {
+      if (!/^\d-\d-\d$/.test(b.numbers))
+        return toast.error(`Fix number format: "${b.numbers}" — must be D-D-D (e.g. 1-2-3).`);
+      if (!b.amount || b.amount < 5)
+        return toast.error(`Amount must be ₱5 or more.`);
+    }
+    setScanSubmitting(true);
+    try {
+      const { data } = await api.post('/admin/cash-bets', {
+        draw_date: scanDrawDate,
+        draw_time: scanDrawTime,
+        bets: scanBets,
+      });
+      toast.success(data.message);
+      setScanBets([]);
+      setScanImage(null);
+      if (scanFileRef.current) scanFileRef.current.value = '';
+      loadBets(); // refresh tally
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to submit bets.');
+    } finally {
+      setScanSubmitting(false);
+    }
   };
 
   const saveDraw = async () => {
@@ -466,6 +582,90 @@ export default function Admin() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Earnings */}
+      <div style={S.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+          <div style={S.title}>💵 Your Earnings</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {[['today','Today'],['week','This Week'],['month','This Month'],['alltime','All Time']].map(([p, label]) => (
+              <button key={p}
+                style={{ padding: '5px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: 'inherit',
+                  background: earningsPeriod === p ? '#065f46' : '#e2e8f0',
+                  color: earningsPeriod === p ? '#fff' : '#64748b' }}
+                onClick={() => { setEarningsPeriod(p); loadEarnings(p); }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {earnings ? (
+          <>
+            {/* Top row — profit from bets */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
+              <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#166534', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Total Bets Collected</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: '#15803d' }}>₱{parseFloat(earnings.total_bets).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              </div>
+              <div style={{ background: 'linear-gradient(135deg,#fef2f2,#fee2e2)', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#991b1b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Total Prizes Paid</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: '#dc2626' }}>₱{parseFloat(earnings.total_prizes).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              </div>
+              <div style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Net from Bets</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: earnings.net_bet_profit >= 0 ? '#15803d' : '#dc2626' }}>
+                  ₱{parseFloat(earnings.net_bet_profit).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+
+            {/* Divider + cash flow */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Real Money In / Out</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#374151', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Deposits Received</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: '#15803d' }}>₱{parseFloat(earnings.total_deposits).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>real money you collected</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#374151', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Withdrawals Paid</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: '#dc2626' }}>₱{parseFloat(earnings.total_withdrawals).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>real money you paid out</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 14, padding: '14px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#374151', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Net Cash in Hand</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: earnings.net_cash_flow >= 0 ? '#15803d' : '#dc2626' }}>
+                  ₱{parseFloat(earnings.net_cash_flow).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>what you physically hold</div>
+              </div>
+            </div>
+
+            {/* Bottom — liability + actual profit */}
+            <div style={{ background: 'linear-gradient(135deg,#0d1a4a,#1e40af)', borderRadius: 16, padding: '16px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>You Owe Players (Liability)</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24' }}>₱{parseFloat(earnings.total_liability).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>total player wallet balances</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Your Actual Profit</div>
+                <div style={{ fontSize: 28, fontWeight: 900, color: earnings.net_cash_flow - earnings.total_liability >= 0 ? '#4ade80' : '#f87171' }}>
+                  ₱{Math.max(0, parseFloat(earnings.net_cash_flow) - parseFloat(earnings.total_liability)).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>cash in hand − what you owe players</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+              💡 <b>Your profit is already in your pocket.</b> Every deposit you approved is real money you received. The liability is the total your players can still withdraw — keep that amount available.
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8' }}>Loading...</div>
+        )}
       </div>
 
       {/* Tally */}
@@ -1047,7 +1247,7 @@ export default function Admin() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 170px 220px', background: '#16a34a', color: '#fff', padding: '9px 14px', fontSize: 11, fontWeight: 700, gap: 8 }}>
               <span>PLAYER</span>
               <span style={{ textAlign: 'right' }}>AMOUNT</span>
-              <span>GCASH REF #</span>
+              <span>NOTE</span>
               <span style={{ textAlign: 'center' }}>ACTION</span>
             </div>
             {deposits.map((d, idx) => (
@@ -1059,8 +1259,8 @@ export default function Admin() {
                 </div>
                 <div style={{ textAlign: 'right', fontWeight: 800, fontSize: 15, color: '#16a34a' }}>₱{parseFloat(d.amount).toLocaleString()}</div>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 12, fontFamily: 'monospace', color: '#1e40af' }}>{d.paymongo_id}</div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>Balance: ₱{parseFloat(d.user?.balance || 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{d.transaction?.note || '—'}</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Bal: ₱{parseFloat(d.user?.balance || 0).toFixed(2)}</div>
                 </div>
                 <div>
                   {d.status === 'pending' ? (
@@ -1116,7 +1316,7 @@ export default function Admin() {
           <div className="scroll-x" style={{ borderRadius: 10 }}>
           <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #e2e8f0', minWidth: 600 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 150px 90px 200px', background: '#1e40af', color: '#fff', padding: '9px 14px', fontSize: 11, fontWeight: 700, gap: 8 }}>
-              <span>PLAYER</span><span style={{ textAlign: 'right' }}>AMOUNT</span><span>GCASH</span><span style={{ textAlign: 'center' }}>BALANCE</span><span style={{ textAlign: 'center' }}>ACTION</span>
+              <span>PLAYER</span><span style={{ textAlign: 'right' }}>AMOUNT</span><span>NOTE</span><span style={{ textAlign: 'center' }}>BALANCE</span><span style={{ textAlign: 'center' }}>ACTION</span>
             </div>
             {withdrawals.map((w, idx) => (
               <div key={w.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 150px 90px 200px', padding: '10px 14px', borderTop: '1px solid #f1f5f9', alignItems: 'center', gap: 8, background: idx % 2 === 0 ? '#fff' : '#fafbff' }}>
@@ -1127,8 +1327,7 @@ export default function Admin() {
                 </div>
                 <div style={{ textAlign: 'right', fontWeight: 800, fontSize: 15, color: '#dc2626' }}>₱{parseFloat(w.amount).toLocaleString()}</div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 12 }}>{w.gcash_name}</div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>{w.gcash_number}</div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{w.contact_info || '—'}</div>
                 </div>
                 <div style={{ textAlign: 'center', fontSize: 13, color: parseFloat(w.user?.balance) >= parseFloat(w.amount) ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
                   ₱{parseFloat(w.user?.balance || 0).toFixed(2)}
@@ -1232,47 +1431,190 @@ export default function Admin() {
         )}
       </div>
 
+      {/* 📸 Scan Bet Slip */}
+      <div style={S.card}>
+        <div style={S.title}>📸 Scan Paper Bet Slip</div>
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 14 }}>
+          Take a photo of your handwritten bet slip. The system will detect numbers and amounts automatically.
+          Review the results, make corrections, then submit.
+        </div>
+
+        {/* Draw settings row */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <input
+            type="date"
+            value={scanDrawDate}
+            onChange={e => setScanDrawDate(e.target.value)}
+            style={{ ...S.input, flex: 'none', width: 150 }}
+          />
+          {['2PM', '5PM', '9PM'].map(t => (
+            <button key={t}
+              style={{ padding: '8px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+                background: scanDrawTime === t ? '#1e40af' : '#e2e8f0',
+                color: scanDrawTime === t ? '#fff' : '#64748b' }}
+              onClick={() => setScanDrawTime(t)}>{t}</button>
+          ))}
+        </div>
+
+        {/* Upload / camera button */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+          <input
+            ref={scanFileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            id="scan-input"
+            style={{ display: 'none' }}
+            onChange={handleScanFile}
+          />
+          <label htmlFor="scan-input"
+            style={{ ...S.btn, display: 'inline-block', cursor: 'pointer', background: '#7c3aed', textAlign: 'center' }}>
+            📷 Take / Upload Photo
+          </label>
+          {scanBets.length === 0 && !scanProcessing && (
+            <button style={{ ...S.btn, background: '#0f766e' }} onClick={addScanBetRow}>+ Add Row Manually</button>
+          )}
+        </div>
+
+        {/* OCR progress */}
+        {scanProcessing && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: '#1e40af', fontWeight: 700, marginBottom: 6 }}>
+              🔍 Scanning image… {scanProgress}%
+            </div>
+            <div style={{ background: '#e2e8f0', borderRadius: 8, height: 8, overflow: 'hidden' }}>
+              <div style={{ background: '#1e40af', height: '100%', width: `${scanProgress}%`, transition: 'width 0.3s' }} />
+            </div>
+          </div>
+        )}
+
+        {/* Image preview */}
+        {scanImage && (
+          <div style={{ marginBottom: 14 }}>
+            <img src={scanImage} alt="Scanned slip" style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 12, border: '2px solid #e2e8f0', objectFit: 'contain' }} />
+          </div>
+        )}
+
+        {/* Extracted bets table */}
+        {scanBets.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 8 }}>
+              ✏️ Review &amp; Edit Before Submitting ({scanBets.length} bet{scanBets.length !== 1 ? 's' : ''})
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9' }}>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#374151', borderRadius: '8px 0 0 0' }}>#</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#374151' }}>Number (D-D-D)</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#374151' }}>Amount (₱)</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#374151' }}>Type</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: '#374151', borderRadius: '0 8px 0 0' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scanBets.map((bet, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '6px 10px', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <input
+                          value={bet.numbers}
+                          onChange={e => {
+                            let v = e.target.value.replace(/[^0-9-]/g, '');
+                            // Auto-insert dashes: "123" → "1-2-3"
+                            if (/^\d{3}$/.test(v.replace(/-/g, ''))) {
+                              const d = v.replace(/-/g, '');
+                              v = `${d[0]}-${d[1]}-${d[2]}`;
+                            }
+                            updateScanBet(idx, 'numbers', v);
+                          }}
+                          placeholder="1-2-3"
+                          maxLength={5}
+                          style={{ width: 70, padding: '5px 8px', borderRadius: 7, border: /^\d-\d-\d$/.test(bet.numbers) ? '1.5px solid #86efac' : '1.5px solid #fca5a5', fontSize: 14, fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <input
+                          type="number"
+                          value={bet.amount}
+                          onChange={e => updateScanBet(idx, 'amount', parseInt(e.target.value, 10) || '')}
+                          min={5}
+                          style={{ width: 80, padding: '5px 8px', borderRadius: 7, border: '1.5px solid #e2e8f0', fontSize: 14, fontFamily: 'inherit' }}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <select
+                          value={bet.bet_type}
+                          onChange={e => updateScanBet(idx, 'bet_type', e.target.value)}
+                          style={{ padding: '5px 8px', borderRadius: 7, border: '1.5px solid #e2e8f0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
+                          <option value="straight">Straight</option>
+                          <option value="rambolito">Rambolito</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                        <button onClick={() => removeScanBet(idx)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 18, lineHeight: 1 }}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Summary + submit */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, fontSize: 13, color: '#374151' }}>
+                <b>Total:</b>{' '}
+                ₱{scanBets.reduce((s, b) => s + (parseFloat(b.amount) || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                {' '}· {scanDrawTime} draw · {scanDrawDate}
+              </div>
+              <button style={{ ...S.btn, background: '#0f766e' }} onClick={addScanBetRow}>+ Row</button>
+              <button
+                style={{ ...S.btn, background: scanSubmitting ? '#94a3b8' : '#16a34a', minWidth: 140 }}
+                onClick={submitCashBets}
+                disabled={scanSubmitting}>
+                {scanSubmitting ? 'Submitting…' : '✓ Submit Cash Bets'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!scanProcessing && !scanImage && scanBets.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
+            📋 Take a photo of a paper slip or add rows manually to record cash bets.
+          </div>
+        )}
+      </div>
+
       {/* Withdrawal Approval Modal */}
-      {wdModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      {wdModal && (        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget) closeWdModal(); }}>
           <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', marginBottom: 4 }}>💸 Confirm Withdrawal</div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Send the GCash payment first, then enter the reference number below.</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Process the player's withdrawal, then mark as confirmed below.</div>
 
-            {/* GCash send details */}
-            <div style={{ background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 14, padding: 16, marginBottom: 18 }}>
-              <div style={{ fontSize: 12, color: '#166534', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Send via GCash</div>
+            <div style={{ background: '#fefce8', border: '2px solid #fde047', borderRadius: 14, padding: 16, marginBottom: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: '#374151' }}>Player</span>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{wdModal.user?.name}</span>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <span style={{ fontSize: 13, color: '#374151' }}>Amount</span>
-                <span style={{ fontSize: 20, fontWeight: 900, color: '#16a34a' }}>₱{parseFloat(wdModal.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontSize: 13, color: '#374151' }}>GCash Name</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{wdModal.gcash_name}</span>
-                  <button onClick={() => { navigator.clipboard.writeText(wdModal.gcash_name); toast.success('Copied!'); }}
-                    style={{ padding: '2px 8px', fontSize: 11, background: '#e0f2fe', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#0369a1', fontWeight: 700, fontFamily: 'inherit' }}>Copy</button>
-                </div>
+                <span style={{ fontSize: 22, fontWeight: 900, color: '#dc2626' }}>₱{parseFloat(wdModal.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#374151' }}>GCash Number</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{wdModal.gcash_number}</span>
-                  <button onClick={() => { navigator.clipboard.writeText(wdModal.gcash_number); toast.success('Copied!'); }}
-                    style={{ padding: '2px 8px', fontSize: 11, background: '#e0f2fe', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#0369a1', fontWeight: 700, fontFamily: 'inherit' }}>Copy</button>
-                </div>
+                <span style={{ fontSize: 13, color: '#374151' }}>Current Balance</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: parseFloat(wdModal.user?.balance) >= parseFloat(wdModal.amount) ? '#16a34a' : '#dc2626' }}>₱{parseFloat(wdModal.user?.balance || 0).toFixed(2)}</span>
               </div>
+              {wdModal.contact_info && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #fde047' }}>
+                  <span style={{ fontSize: 12, color: '#92400e', fontWeight: 700 }}>Player message: </span>
+                  <span style={{ fontSize: 12, color: '#374151' }}>{wdModal.contact_info}</span>
+                </div>
+              )}
             </div>
 
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>GCash Reference Number <span style={{ color: '#dc2626' }}>*</span></div>
-            <input
-              value={wdRef}
-              onChange={e => setWdRef(e.target.value)}
-              placeholder="e.g. 12345678901234"
-              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 14 }}
-            />
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Note (optional)</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Admin Note (optional)</div>
             <input
               value={wdNote[wdModal.id] || ''}
               onChange={e => setWdNote(n => ({ ...n, [wdModal.id]: e.target.value }))}

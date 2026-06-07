@@ -34,6 +34,69 @@ exports.getDashboard = async (req, res) => {
   }
 };
 
+// GET /api/admin/earnings
+exports.getEarnings = async (req, res) => {
+  try {
+    const { period = 'today' } = req.query; // today | week | month | alltime
+    const now = moment().tz(TZ);
+    let periodStart;
+    if (period === 'today')   periodStart = now.clone().startOf('day').toISOString();
+    else if (period === 'week')  periodStart = now.clone().startOf('isoWeek').toISOString();
+    else if (period === 'month') periodStart = now.clone().startOf('month').toISOString();
+    else periodStart = null; // alltime — no date filter
+
+    const txFilter = (type) => {
+      let q = supabase.from('transactions').select('amount').eq('type', type);
+      if (periodStart) q = q.gte('created_at', periodStart);
+      return q;
+    };
+
+    const [
+      { data: betTxns },
+      { data: prizeTxns },
+      { data: depositTxns },
+      { data: withdrawalTxns },
+      { data: allUsers },
+    ] = await Promise.all([
+      txFilter('bet'),
+      txFilter('prize'),
+      // For deposits, only count credited ones (balance_after > balance_before)
+      supabase.from('transactions').select('amount, balance_before, balance_after').eq('type', 'deposit').gte(periodStart ? 'created_at' : 'id', periodStart ?? 0),
+      txFilter('withdrawal'),
+      supabase.from('users').select('balance').eq('role', 'bettor').eq('is_active', true),
+    ]);
+
+    const sum = (arr) => (arr || []).reduce((s, r) => s + parseFloat(r.amount), 0);
+
+    const totalBets        = sum(betTxns);
+    const totalPrizes      = sum(prizeTxns);
+    const netBetProfit     = totalBets - totalPrizes;
+
+    const totalDeposits    = (depositTxns || []).reduce((s, t) =>
+      parseFloat(t.balance_after) > parseFloat(t.balance_before) ? s + parseFloat(t.amount) : s, 0);
+    const totalWithdrawals = sum(withdrawalTxns);
+    const netCashFlow      = totalDeposits - totalWithdrawals;
+
+    // Current liability is always all-time (total owed to players right now)
+    const totalLiability   = (allUsers || []).reduce((s, u) => s + parseFloat(u.balance), 0);
+
+    return res.json({
+      period,
+      total_bets:        totalBets,
+      total_prizes:      totalPrizes,
+      net_bet_profit:    netBetProfit,
+      total_deposits:    totalDeposits,
+      total_withdrawals: totalWithdrawals,
+      net_cash_flow:     netCashFlow,
+      total_liability:   totalLiability,       // always current
+      your_actual_profit: netBetProfit - totalLiability < 0 ? 0 : netBetProfit, // simplified
+    });
+  } catch (err) {
+    console.error('Earnings error:', err);
+    return res.status(500).json({ message: 'Failed to load earnings.' });
+  }
+};
+
 exports.getUsers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search } = req.query;
@@ -285,7 +348,8 @@ exports.processWithdrawal = async (req, res) => {
         balance_before: parseFloat(withdrawal.user.balance),
         balance_after: newBalance,
         reference: `WD-${id}`,
-        note: `Withdrawal to GCash ${withdrawal.gcash_number} (${withdrawal.gcash_name})`,
+        note: `Cash-out ₱${withdrawal.amount}${withdrawal.contact_info ? ' — ' + withdrawal.contact_info : ''} APPROVED`,
+
       });
     }
 
@@ -306,7 +370,7 @@ exports.getDeposits = async (req, res) => {
     const { status } = req.query;
     let query = supabase
       .from('payments')
-      .select('*, user:users(id, name, phone, balance)')
+      .select('*, user:users(id, name, phone, balance), transaction:transactions(note)')
       .not('transaction_id', 'is', null)
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
@@ -343,7 +407,7 @@ exports.processDeposit = async (req, res) => {
       if (result?.error) return res.status(400).json({ message: result.error });
       if (payment.transaction_id) {
         await supabase.from('transactions').update({
-          note: `GCash deposit ₱${payment.amount} APPROVED — ref: ${payment.paymongo_id}`,
+          note: `Cash-in ₱${payment.amount} APPROVED`,
         }).eq('id', payment.transaction_id);
       }
     } else {
@@ -352,7 +416,7 @@ exports.processDeposit = async (req, res) => {
         .eq('id', id);
       if (payment.transaction_id) {
         await supabase.from('transactions').update({
-          note: `GCash deposit REJECTED${note ? ' — ' + note : ''} — ref: ${payment.paymongo_id}`,
+          note: `Cash-in REJECTED${note ? ' — ' + note : ''}`,
         }).eq('id', payment.transaction_id);
       }
     }
@@ -378,6 +442,53 @@ exports.getUserTransactions = async (req, res) => {
     return res.json({ transactions: data || [] });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to get transactions.' });
+  }
+};
+
+// ── Place Cash Bets (face-to-face / paper slip bets) ─────────────────────────
+exports.placeCashBets = async (req, res) => {
+  try {
+    const { bets, draw_date, draw_time } = req.body;
+    const adminId = req.user.id;
+
+    if (!Array.isArray(bets) || bets.length === 0)
+      return res.status(400).json({ message: 'No bets provided.' });
+    if (!draw_date || !draw_time)
+      return res.status(400).json({ message: 'draw_date and draw_time are required.' });
+    if (!['2PM', '5PM', '9PM'].includes(draw_time))
+      return res.status(400).json({ message: 'Invalid draw_time.' });
+
+    const rows = [];
+    for (const bet of bets) {
+      const nums = String(bet.numbers || '').trim();
+      if (!/^\d-\d-\d$/.test(nums))
+        return res.status(400).json({ message: `Invalid number format: "${nums}". Must be D-D-D (e.g. 1-2-3).` });
+
+      const amount = parseFloat(bet.amount);
+      if (isNaN(amount) || amount < 5)
+        return res.status(400).json({ message: `Amount must be at least ₱5 (got ${bet.amount}).` });
+
+      rows.push({
+        user_id:   adminId,
+        draw_date,
+        draw_time,
+        numbers:   nums,
+        bet_type:  ['straight', 'rambolito'].includes(bet.bet_type) ? bet.bet_type : 'straight',
+        amount,
+        status:    'pending',
+      });
+    }
+
+    const { data, error } = await supabase.from('bets').insert(rows).select('id, numbers, bet_type, amount');
+    if (error) {
+      console.error('placeCashBets insert error:', error);
+      return res.status(500).json({ message: 'Failed to save bets.' });
+    }
+
+    return res.status(201).json({ message: `${data.length} cash bet(s) recorded.`, bets: data });
+  } catch (err) {
+    console.error('placeCashBets error:', err);
+    return res.status(500).json({ message: 'Failed to place cash bets.' });
   }
 };
 

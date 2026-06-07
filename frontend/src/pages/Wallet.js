@@ -26,18 +26,15 @@ export default function Wallet() {
   const { user, refreshUser } = useAuth();
   const [history, setHistory] = useState([]);
 
-  // GCash QR deposit state
-  const [gcashAmount, setGcashAmount]       = useState(100);
-  const [gcashQr, setGcashQr]               = useState(null);
-  const [gcashRef, setGcashRef]             = useState('');
-  const [gcashLoading, setGcashLoading]     = useState(false);
-  const [gcashSubmitting, setGcashSubmitting] = useState(false);
+  // Cash-in state
+  const [ciAmount, setCiAmount]   = useState(100);
+  const [ciNote, setCiNote]       = useState('');
+  const [ciLoading, setCiLoading] = useState(false);
 
-  // Withdraw state
-  const [wdAmount, setWdAmount]   = useState(100);
-  const [wdPhone, setWdPhone]     = useState('');
-  const [wdName, setWdName]       = useState('');
-  const [wdLoading, setWdLoading] = useState(false);
+  // Cash-out state
+  const [coAmount, setCoAmount]     = useState(100);
+  const [coNote, setCoNote]         = useState('');
+  const [coLoading, setCoLoading]   = useState(false);
   const [myWithdrawals, setMyWithdrawals] = useState([]);
 
   const loadWithdrawals = useCallback(() => {
@@ -50,53 +47,36 @@ export default function Wallet() {
     loadWithdrawals();
   }, []); // eslint-disable-line
 
-  const handleGetGcashQR = async () => {
-    if (gcashAmount < 100) return toast.error('Minimum deposit is \u20B1100.');
-    setGcashLoading(true);
-    setGcashQr(null);
-    setGcashRef('');
+  const handleCashIn = async () => {
+    if (ciAmount < 50) return toast.error('Minimum cash-in is \u20B150.');
+    setCiLoading(true);
     try {
-      const { data } = await api.post('/payments/gcash-link', { amount: gcashAmount });
-      setGcashQr(data.qr_image);
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to generate QR. Try again.');
-    } finally {
-      setGcashLoading(false);
-    }
-  };
-
-  const handleGcashDeposit = async () => {
-    if (!gcashRef.trim()) return toast.error('Enter your GCash reference number.');
-    setGcashSubmitting(true);
-    try {
-      const { data } = await api.post('/payments/deposit', { amount: gcashAmount, gcash_reference: gcashRef.trim() });
+      const { data } = await api.post('/payments/deposit', { amount: ciAmount, note: ciNote.trim() });
       toast.success(data.message);
-      setGcashQr(null);
-      setGcashRef('');
+      setCiNote('');
       api.get('/payments/history').then(r => setHistory(r.data.transactions));
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to submit deposit. Try again.');
+      toast.error(err.response?.data?.message || 'Failed to submit request. Try again.');
     } finally {
-      setGcashSubmitting(false);
+      setCiLoading(false);
     }
   };
 
-  const handleWithdraw = async () => {
-    if (wdAmount < 100) return toast.error('Minimum withdrawal is \u20B1100.');
-    if (!/^09\d{9}$/.test(wdPhone)) return toast.error('Enter a valid GCash number (09XXXXXXXXX).');
-    if (!wdName.trim()) return toast.error('Enter your GCash account name.');
-    setWdLoading(true);
+  const handleCashOut = async () => {
+    if (coAmount < 100) return toast.error('Minimum cash-out is \u20B1100.');
+    setCoLoading(true);
     try {
-      const { data } = await api.post('/payments/withdraw', { amount: wdAmount, gcash_number: wdPhone, gcash_name: wdName.trim() });
+      const { data } = await api.post('/payments/withdraw', { amount: coAmount, contact_info: coNote.trim() });
       toast.success(data.message);
-      setWdAmount(100); setWdPhone(''); setWdName('');
+      setCoAmount(100); setCoNote('');
       loadWithdrawals();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Request failed. Try again.');
     } finally {
-      setWdLoading(false);
+      setCoLoading(false);
     }
   };
+
 
   return (
     <div className="animate-fadeInUp">
@@ -115,94 +95,74 @@ export default function Wallet() {
         </div>
       </div>
 
-      {/* Deposit via GCash QR */}
+      {/* Top Up */}
       <div style={card}>
-        <div style={{ fontSize: 20, fontWeight: 900, color: '#059669', marginBottom: 6 }}>💚 Deposit via GCash</div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-          Scan the QR with your <b>phone camera</b> (not the GCash app scanner), tap the link, then press <b>Open GCash App</b>.
+        <div style={{ fontSize: 20, fontWeight: 900, color: '#059669', marginBottom: 6 }}>💰 Top Up Wallet</div>
+        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#166534' }}>
+          Submit a top-up request. Admin will review and credit your balance once confirmed.
         </div>
 
-        <label style={lbl}>Choose Amount</label>
+        <label style={lbl}>Amount (minimum {P(50)})</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           {QUICK.map(a => (
             <button key={a}
               style={{
                 padding: '8px 16px', borderRadius: 10, fontFamily: 'inherit',
-                border: `2px solid ${gcashAmount === a ? '#059669' : '#e2e8f0'}`,
-                background: gcashAmount === a ? '#f0fdf4' : '#f8fafc',
-                color: gcashAmount === a ? '#059669' : '#374151',
+                border: `2px solid ${ciAmount === a ? '#059669' : '#e2e8f0'}`,
+                background: ciAmount === a ? '#f0fdf4' : '#f8fafc',
+                color: ciAmount === a ? '#059669' : '#374151',
                 fontWeight: 700, cursor: 'pointer', fontSize: 14,
               }}
-              onClick={() => { setGcashAmount(a); setGcashQr(null); setGcashRef(''); }}>
+              onClick={() => setCiAmount(a)}>
               {P(a)}
             </button>
           ))}
         </div>
-        <input style={inp} type="number" min={100} value={gcashAmount}
-          onChange={e => { setGcashAmount(parseInt(e.target.value) || 100); setGcashQr(null); setGcashRef(''); }} />
+        <input style={inp} type="number" min={50} value={ciAmount}
+          onChange={e => setCiAmount(parseInt(e.target.value) || 50)} />
 
-        {!gcashQr ? (
-          <button
-            style={{ width: '100%', padding: 14, background: gcashLoading ? '#94a3b8' : 'linear-gradient(90deg,#059669,#10b981)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: gcashLoading ? 'not-allowed' : 'pointer', boxShadow: gcashLoading ? 'none' : '0 4px 14px rgba(5,150,105,0.35)', fontFamily: 'inherit' }}
-            disabled={gcashLoading} onClick={handleGetGcashQR}>
-            {gcashLoading ? 'Generating QR...' : `Show GCash QR for ${P(gcashAmount)}`}
-          </button>
-        ) : (
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
-              Send exactly <b>{P(gcashAmount)}</b> via GCash Send Money
-            </div>
-            <img src={gcashQr} alt="GCash QR" style={{ width: 220, height: 220, maxWidth: '100%', border: '4px solid #bbf7d0', borderRadius: 16, objectFit: 'contain' }} />
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>
-              � Scan with your <b>phone camera</b> — do <b>NOT</b> use the GCash app scanner
-            </div>
+        <label style={lbl}>Message to admin <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span></label>
+        <input style={inp} type="text" placeholder="Any message..." value={ciNote}
+          onChange={e => setCiNote(e.target.value)} />
 
-            <div style={{ marginTop: 16, textAlign: 'left' }}>
-              <label style={lbl}>GCash Reference Number (13 digits)</label>
-              <input style={inp} type="text" placeholder="e.g. 1234567890123" value={gcashRef}
-                onChange={e => setGcashRef(e.target.value)} />
-              <button
-                style={{ width: '100%', padding: 14, background: gcashSubmitting ? '#94a3b8' : 'linear-gradient(90deg,#059669,#10b981)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: gcashSubmitting ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
-                disabled={gcashSubmitting} onClick={handleGcashDeposit}>
-                {gcashSubmitting ? 'Submitting...' : 'Submit Deposit Request'}
-              </button>
-            </div>
-            <button style={{ marginTop: 10, background: 'none', border: '1px solid #e2e8f0', borderRadius: 8, padding: '7px 16px', fontSize: 13, color: '#64748b', cursor: 'pointer', fontFamily: 'inherit' }}
-              onClick={() => { setGcashQr(null); setGcashRef(''); }}>Cancel</button>
-          </div>
-        )}
+        <button
+          style={{ width: '100%', padding: 14, background: ciLoading ? '#94a3b8' : 'linear-gradient(90deg,#059669,#10b981)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: ciLoading ? 'not-allowed' : 'pointer', boxShadow: ciLoading ? 'none' : '0 4px 14px rgba(5,150,105,0.35)', fontFamily: 'inherit' }}
+          disabled={ciLoading} onClick={handleCashIn}>
+          {ciLoading ? 'Submitting...' : `Request Top-Up ${P(ciAmount)}`}
+        </button>
       </div>
 
       {/* Withdraw */}
       <div style={card}>
-        <div style={{ fontSize: 20, fontWeight: 900, color: '#7c3aed', marginBottom: 6 }}>🏧 Withdraw to GCash</div>
+        <div style={{ fontSize: 20, fontWeight: 900, color: '#7c3aed', marginBottom: 6 }}>🏧 Withdraw</div>
         <div style={{ background: '#fefce8', border: '1px solid #fde047', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#854d0e' }}>
-          ⚠️ Withdrawal requests are reviewed by admin and usually processed within 24 hours.
+          Submit a withdrawal request. Admin will process and confirm once done.
         </div>
 
         <label style={lbl}>Amount (minimum {P(100)})</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          {[100, 200, 500, 1000].map(a => (
+          {QUICK.map(a => (
             <button key={a}
               style={{
                 padding: '8px 14px', borderRadius: 10, fontFamily: 'inherit',
-                border: `2px solid ${wdAmount === a ? '#7c3aed' : '#e2e8f0'}`,
-                background: wdAmount === a ? '#f5f3ff' : '#f8fafc',
-                color: wdAmount === a ? '#7c3aed' : '#374151',
+                border: `2px solid ${coAmount === a ? '#7c3aed' : '#e2e8f0'}`,
+                background: coAmount === a ? '#f5f3ff' : '#f8fafc',
+                color: coAmount === a ? '#7c3aed' : '#374151',
                 fontWeight: 700, cursor: 'pointer', fontSize: 14,
               }}
-              onClick={() => setWdAmount(a)}>{P(a)}</button>
+              onClick={() => setCoAmount(a)}>{P(a)}</button>
           ))}
         </div>
-        <input style={inp} type="number" min={100} value={wdAmount} onChange={e => setWdAmount(parseInt(e.target.value) || 100)} />
-        <label style={lbl}>GCash Number (09XXXXXXXXX)</label>
-        <input style={inp} type="tel" placeholder="09XXXXXXXXX" value={wdPhone} onChange={e => setWdPhone(e.target.value)} />
-        <label style={lbl}>GCash Account Name</label>
-        <input style={inp} type="text" placeholder="Full name on GCash" value={wdName} onChange={e => setWdName(e.target.value)} />
+        <input style={inp} type="number" min={100} value={coAmount} onChange={e => setCoAmount(parseInt(e.target.value) || 100)} />
+
+        <label style={lbl}>Message to admin <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span></label>
+        <input style={inp} type="text" placeholder="Any message..." value={coNote}
+          onChange={e => setCoNote(e.target.value)} />
+
         <button
-          style={{ width: '100%', padding: 14, background: wdLoading ? '#94a3b8' : 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: wdLoading ? 'not-allowed' : 'pointer', boxShadow: wdLoading ? 'none' : '0 4px 14px rgba(124,58,237,0.35)', fontFamily: 'inherit' }}
-          disabled={wdLoading} onClick={handleWithdraw}>
-          {wdLoading ? 'Submitting...' : `Request ${P(wdAmount)} Withdrawal`}
+          style={{ width: '100%', padding: 14, background: coLoading ? '#94a3b8' : 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: coLoading ? 'not-allowed' : 'pointer', boxShadow: coLoading ? 'none' : '0 4px 14px rgba(124,58,237,0.35)', fontFamily: 'inherit' }}
+          disabled={coLoading} onClick={handleCashOut}>
+          {coLoading ? 'Submitting...' : `Request Withdrawal ${P(coAmount)}`}
         </button>
       </div>
 
@@ -216,9 +176,10 @@ export default function Wallet() {
             return (
               <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid #f1f5f9', gap: 8, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{P(w.amount)} to {w.gcash_name}</div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>{w.gcash_number} · {new Date(w.created_at).toLocaleString('en-PH')}</div>
-                  {w.note && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Note: {w.note}</div>}
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Cash-Out {P(w.amount)}</div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{new Date(w.created_at).toLocaleString('en-PH')}</div>
+                  {w.contact_info && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Note: {w.contact_info}</div>}
+                  {w.note && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Admin note: {w.note}</div>}
                 </div>
                 <span style={{ padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', background: ok ? '#dcfce7' : bad ? '#fee2e2' : '#fef3c7', color: ok ? '#166534' : bad ? '#991b1b' : '#92400e' }}>
                   {ok ? '✓ Approved' : bad ? '✗ Rejected' : '⏳ Pending'}
