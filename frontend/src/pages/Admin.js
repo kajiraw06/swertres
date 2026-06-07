@@ -334,16 +334,19 @@ export default function Admin() {
     // Normalize common OCR misreads for digits
     const norm = rawText
       .replace(/[lI|]/g, '1')
-      .replace(/\b[oO]\b/g, '0')
-      .replace(/[sS]/g, '5');
+      .replace(/[oO]/g, '0')
+      .replace(/[sS]/g, '5')
+      .replace(/[bB]/g, '8')
+      .replace(/[gG]/g, '9');
 
     const bets = [];
     for (const line of norm.split('\n')) {
       const t = line.trim();
       if (!t) continue;
-      // Match: 3 single digits (with optional dash/space separators) then whitespace then an amount
-      // e.g. "1-2-3 20", "1 2 3 20", "123 20"
-      const m = t.match(/^(\d)\s*[-\s]?\s*(\d)\s*[-\s]?\s*(\d)\s+(\d+)/);
+      // Match 3 digits (optionally separated by dashes/spaces) then any combo of
+      // spaces/dashes as separator, then the amount.
+      // Handles: "908 - 20", "9-0-8 20", "123 20", "9 0 8 - 20"
+      const m = t.match(/(\d)\s*[-\s]?\s*(\d)\s*[-\s]?\s*(\d)\s*[-\s]+\s*(\d+)/);
       if (m) {
         const [, a, b, c, amt] = m;
         const amount = parseInt(amt, 10);
