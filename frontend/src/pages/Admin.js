@@ -363,15 +363,45 @@ export default function Admin() {
     setScanProgress(0);
     setScanBets([]);
     try {
+      // ── Preprocess image: scale up + convert to high-contrast B&W ──
+      const processedDataUrl = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Scale up so digits are large enough for Tesseract (~2000px on longest side)
+          const scale = Math.min(4, Math.max(2, 2000 / Math.max(img.width, img.height)));
+          canvas.width  = img.width  * scale;
+          canvas.height = img.height * scale;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          // Grayscale + high-contrast threshold — makes handwriting much cleaner
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const val = gray < 150 ? 0 : 255; // threshold: dark → black, light → white
+            d[i] = d[i + 1] = d[i + 2] = val;
+            d[i + 3] = 255;
+          }
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.src = imageDataUrl;
+      });
+
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng', 1, {
         logger: m => {
           if (m.status === 'recognizing text') setScanProgress(Math.round(m.progress * 100));
         },
       });
-      // Restrict to digits, dash, and space only — greatly improves accuracy for number slips
-      await worker.setParameters({ tessedit_char_whitelist: '0123456789- \n' });
-      const { data: { text } } = await worker.recognize(imageDataUrl);
+      await worker.setParameters({
+        tessedit_char_whitelist: '0123456789- \n',
+        tessedit_pageseg_mode:   '6', // single uniform block of text
+      });
+      const { data: { text } } = await worker.recognize(processedDataUrl);
       await worker.terminate();
       const extracted = parseBetText(text);
       setScanBets(extracted);
