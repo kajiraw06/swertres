@@ -370,15 +370,32 @@ export default function Admin() {
     setScanProgress(0);
     setScanBets([]);
     try {
-      // ── Step 1: try Google Cloud Vision API (server-side, handles handwriting perfectly) ──
+      // ── Step 1: try Google Cloud Vision API (client-side key, handles handwriting perfectly) ──
+      // Add REACT_APP_GOOGLE_VISION_API_KEY to your Vercel environment variables.
       let cloudText = null;
-      try {
-        const base64 = imageDataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
-        setScanProgress(20);
-        const { data } = await api.post('/admin/scan-slip', { image: base64 });
-        cloudText = data.text || null;
-      } catch (err) {
-        if (err.response?.status !== 503) throw err; // 503 = not configured, fall through to Tesseract
+      const visionKey = process.env.REACT_APP_GOOGLE_VISION_API_KEY;
+      if (visionKey) {
+        try {
+          const base64 = imageDataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
+          setScanProgress(20);
+          const resp = await fetch(
+            `https://vision.googleapis.com/v1/images:annotate?key=${visionKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                requests: [{
+                  image:    { content: base64 },
+                  features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+                }],
+              }),
+            }
+          );
+          const json = await resp.json();
+          cloudText = json.responses?.[0]?.fullTextAnnotation?.text || null;
+        } catch (err) {
+          console.warn('Vision API failed, falling back to Tesseract:', err);
+        }
       }
 
       if (cloudText !== null) {
