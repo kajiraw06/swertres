@@ -371,13 +371,13 @@ export default function Admin() {
     setScanProgress(0);
     setScanBets([]);
     try {
-      // ── Step 1: try Google Cloud Vision API (client-side key, handles handwriting perfectly) ──
-      // Add REACT_APP_GOOGLE_VISION_API_KEY to your Vercel environment variables.
       let cloudText = null;
+
+      // ── Option A: Google Cloud Vision (REACT_APP_GOOGLE_VISION_API_KEY) ──
       const visionKey = process.env.REACT_APP_GOOGLE_VISION_API_KEY;
-      if (visionKey) {
+      if (visionKey && !cloudText) {
         try {
-          const base64 = imageDataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
+          const base64 = imageDataUrl.split(',')[1];
           setScanProgress(20);
           const resp = await fetch(
             `https://vision.googleapis.com/v1/images:annotate?key=${visionKey}`,
@@ -385,18 +385,35 @@ export default function Admin() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                requests: [{
-                  image:    { content: base64 },
-                  features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
-                }],
+                requests: [{ image: { content: base64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] }],
               }),
             }
           );
           const json = await resp.json();
-          cloudText = json.responses?.[0]?.fullTextAnnotation?.text || null;
-        } catch (err) {
-          console.warn('Vision API failed, falling back to Tesseract:', err);
-        }
+          if (resp.ok) cloudText = json.responses?.[0]?.fullTextAnnotation?.text || null;
+          else console.warn('Vision API error:', json.error?.message);
+        } catch (err) { console.warn('Vision API failed:', err); }
+      }
+
+      // ── Option B: OCR.space (REACT_APP_OCR_SPACE_API_KEY) — free, no credit card ──
+      // Register free at https://ocr.space/ocrapi → 25,000 requests/month
+      const ocrSpaceKey = process.env.REACT_APP_OCR_SPACE_API_KEY;
+      if (ocrSpaceKey && !cloudText) {
+        try {
+          setScanProgress(20);
+          const form = new FormData();
+          form.append('apikey', ocrSpaceKey);
+          form.append('base64Image', imageDataUrl); // full data URL with prefix
+          form.append('language', 'eng');
+          form.append('isOverlayRequired', 'false');
+          form.append('OCREngine', '2');
+          form.append('isHandwriting', 'true');
+          const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
+          const json = await resp.json();
+          const parsed = json.ParsedResults?.[0]?.ParsedText || null;
+          if (parsed) cloudText = parsed;
+          else console.warn('OCR.space returned no text:', json);
+        } catch (err) { console.warn('OCR.space failed:', err); }
       }
 
       if (cloudText !== null) {
