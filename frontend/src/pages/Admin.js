@@ -375,9 +375,10 @@ export default function Admin() {
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          // Scale to ~2500px on the longest side for better digit resolution
+          // Keep the longest side at ~1500px: downscale large phone photos,
+          // upscale only tiny images (max 2×). This prevents out-of-memory crashes.
           const maxDim = Math.max(img.width, img.height);
-          const scale = Math.min(5, Math.max(2, 2500 / maxDim));
+          const scale = maxDim > 1500 ? 1500 / maxDim : Math.min(2, 1500 / maxDim);
           const W = Math.round(img.width  * scale);
           const H = Math.round(img.height * scale);
           canvas.width  = W;
@@ -462,8 +463,9 @@ export default function Admin() {
         return text;
       };
 
-      // Dual-pass: PSM 6 (uniform block) + PSM 11 (sparse text) — both strong for handwriting
-      const [text6, text11] = await Promise.all([recognize(6, 0), recognize(11, 50)]);
+      // Dual-pass: PSM 6 (uniform block) then PSM 11 (sparse text) — run sequentially to stay within mobile memory limits
+      const text6  = await recognize(6, 0);
+      const text11 = await recognize(11, 50);
       setScanProgress(100);
 
       const bets6  = parseBetText(text6);
