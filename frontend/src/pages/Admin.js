@@ -331,27 +331,34 @@ export default function Admin() {
 
   // ── OCR / Scan Slip helpers ──────────────────────────────
   const parseBetText = useCallback((rawText) => {
-    // Normalize common OCR misreads for digits
+    // Normalize common OCR misreads for digits (expanded set)
     const norm = rawText
-      .replace(/[lI|]/g, '1')
-      .replace(/[oO]/g, '0')
-      .replace(/[sS]/g, '5')
+      .replace(/[lI|!]/g, '1')
+      .replace(/[oO@]/g, '0')
+      .replace(/[sS$]/g, '5')
       .replace(/[bB]/g, '8')
-      .replace(/[gG]/g, '9');
+      .replace(/[gG&]/g, '9')
+      .replace(/[zZ]/g, '2')
+      .replace(/[A]/g, '4')
+      .replace(/[T]/g, '7')
+      .replace(/[Ee]/g, '6');
 
+    const seen = new Set();
     const bets = [];
     for (const line of norm.split('\n')) {
       const t = line.trim();
       if (!t) continue;
-      // Match 3 digits (optionally separated by dashes/spaces) then any combo of
-      // spaces/dashes as separator, then the amount.
-      // Handles: "908 - 20", "9-0-8 20", "123 20", "9 0 8 - 20"
-      const m = t.match(/(\d)\s*[-\s]?\s*(\d)\s*[-\s]?\s*(\d)\s*[-\s]+\s*(\d+)/);
+      // Match 3 digits (optionally separated by dashes/spaces/dots) then separator, then amount.
+      // Handles: "908 - 20", "9-0-8 20", "123 20", "9 0 8 - 20", "9.0.8-20"
+      const m = t.match(/(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]?\s*(\d)\s*[.\-\s]+\s*(\d+)/);
       if (m) {
         const [, a, b, c, amt] = m;
         const amount = parseInt(amt, 10);
-        if (amount >= 5 && amount <= 50000) {
-          bets.push({ numbers: `${a}-${b}-${c}`, amount, bet_type: 'straight' });
+        const numbers = `${a}-${b}-${c}`;
+        const key = `${numbers}:${amount}`;
+        if (amount >= 5 && amount <= 50000 && !seen.has(key)) {
+          seen.add(key);
+          bets.push({ numbers, amount, bet_type: 'straight' });
         }
       }
     }
@@ -363,27 +370,72 @@ export default function Admin() {
     setScanProgress(0);
     setScanBets([]);
     try {
-      // ── Preprocess image: scale up + convert to high-contrast B&W ──
+      // ── Preprocess: upscale → grayscale → Otsu auto-threshold → 3×3 dilation ──
       const processedDataUrl = await new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          // Scale up so digits are large enough for Tesseract (~2000px on longest side)
-          const scale = Math.min(4, Math.max(2, 2000 / Math.max(img.width, img.height)));
-          canvas.width  = img.width  * scale;
-          canvas.height = img.height * scale;
+          // Scale to ~2500px on the longest side for better digit resolution
+          const maxDim = Math.max(img.width, img.height);
+          const scale = Math.min(5, Math.max(2, 2500 / maxDim));
+          const W = Math.round(img.width  * scale);
+          const H = Math.round(img.height * scale);
+          canvas.width  = W;
+          canvas.height = H;
           const ctx = canvas.getContext('2d');
           ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          // Grayscale + high-contrast threshold — makes handwriting much cleaner
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          ctx.fillRect(0, 0, W, H);
+          ctx.drawImage(img, 0, 0, W, H);
+
+          const imgData = ctx.getImageData(0, 0, W, H);
           const d = imgData.data;
+
+          // Step 1 – convert to grayscale
+          const gray = new Uint8Array(W * H);
           for (let i = 0; i < d.length; i += 4) {
-            const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const val = gray < 150 ? 0 : 255; // threshold: dark → black, light → white
-            d[i] = d[i + 1] = d[i + 2] = val;
-            d[i + 3] = 255;
+            gray[i >> 2] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+          }
+
+          // Step 2 – Otsu's method: find the threshold that maximises between-class variance
+          const hist = new Int32Array(256);
+          for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+          const total = gray.length;
+          let sum = 0;
+          for (let i = 0; i < 256; i++) sum += i * hist[i];
+          let sumB = 0, wB = 0, maxVar = 0, thresh = 128;
+          for (let t = 0; t < 256; t++) {
+            wB += hist[t];
+            if (!wB) continue;
+            const wF = total - wB;
+            if (!wF) break;
+            sumB += t * hist[t];
+            const mB = sumB / wB;
+            const mF = (sum - sumB) / wF;
+            const v = wB * wF * (mB - mF) ** 2;
+            if (v > maxVar) { maxVar = v; thresh = t; }
+          }
+
+          // Step 3 – binarise: ink → 0 (black), background → 255 (white)
+          const bin = new Uint8Array(W * H);
+          for (let i = 0; i < gray.length; i++) bin[i] = gray[i] <= thresh ? 0 : 255;
+
+          // Step 4 – 3×3 morphological dilation to thicken thin handwritten strokes
+          const dilated = new Uint8Array(W * H).fill(255);
+          for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+              if (
+                bin[(y - 1) * W + (x - 1)] === 0 || bin[(y - 1) * W + x] === 0 || bin[(y - 1) * W + (x + 1)] === 0 ||
+                bin[ y      * W + (x - 1)] === 0 || bin[ y      * W + x] === 0 || bin[ y      * W + (x + 1)] === 0 ||
+                bin[(y + 1) * W + (x - 1)] === 0 || bin[(y + 1) * W + x] === 0 || bin[(y + 1) * W + (x + 1)] === 0
+              ) dilated[y * W + x] = 0;
+            }
+          }
+
+          // Step 5 – write processed pixels back
+          for (let i = 0; i < dilated.length; i++) {
+            const v = dilated[i];
+            d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v;
+            d[i * 4 + 3] = 255;
           }
           ctx.putImageData(imgData, 0, 0);
           resolve(canvas.toDataURL('image/png'));
@@ -392,21 +444,40 @@ export default function Admin() {
       });
 
       const { createWorker } = await import('tesseract.js');
-      const worker = await createWorker('eng', 1, {
-        logger: m => {
-          if (m.status === 'recognizing text') setScanProgress(Math.round(m.progress * 100));
-        },
-      });
-      await worker.setParameters({
-        tessedit_char_whitelist: '0123456789- \n',
-        tessedit_pageseg_mode:   '6', // single uniform block of text
-      });
-      const { data: { text } } = await worker.recognize(processedDataUrl);
-      await worker.terminate();
-      const extracted = parseBetText(text);
-      setScanBets(extracted);
-      if (extracted.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
-      else toast.success(`${extracted.length} bet(s) detected — review before submitting.`);
+
+      // Helper: run one Tesseract pass with a given PSM mode
+      const recognize = async (psm, progressOffset) => {
+        const w = await createWorker('eng', 1, {
+          logger: m => {
+            if (m.status === 'recognizing text')
+              setScanProgress(progressOffset + Math.round(m.progress * 50));
+          },
+        });
+        await w.setParameters({
+          tessedit_char_whitelist: '0123456789- \n',
+          tessedit_pageseg_mode:   String(psm),
+        });
+        const { data: { text } } = await w.recognize(processedDataUrl);
+        await w.terminate();
+        return text;
+      };
+
+      // Dual-pass: PSM 6 (uniform block) + PSM 11 (sparse text) — both strong for handwriting
+      const [text6, text11] = await Promise.all([recognize(6, 0), recognize(11, 50)]);
+      setScanProgress(100);
+
+      const bets6  = parseBetText(text6);
+      const bets11 = parseBetText(text11);
+
+      // Merge results; PSM 6 takes priority, PSM 11 fills in anything it caught that PSM 6 missed
+      const merged = [...bets6];
+      for (const b of bets11) {
+        if (!merged.some(x => x.numbers === b.numbers && x.amount === b.amount)) merged.push(b);
+      }
+
+      setScanBets(merged);
+      if (merged.length === 0) toast('No bets detected. Check the image or add rows manually.', { icon: '🔍' });
+      else toast.success(`${merged.length} bet(s) detected — review before submitting.`);
     } catch (err) {
       console.error('OCR error:', err);
       toast.error('OCR failed. Try a clearer image.');
