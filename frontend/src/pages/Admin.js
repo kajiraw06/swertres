@@ -410,9 +410,14 @@ export default function Admin() {
           form.append('isHandwriting', 'true');
           const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
           const json = await resp.json();
-          const parsed = json.ParsedResults?.[0]?.ParsedText || null;
-          if (parsed) cloudText = parsed;
-          else console.warn('OCR.space returned no text:', json);
+          console.log('[OCR] OCR.space full response:', json);
+          if (json.IsErroredOnProcessing) {
+            console.warn('[OCR] OCR.space error:', json.ErrorMessage);
+          } else {
+            const parsed = json.ParsedResults?.[0]?.ParsedText || null;
+            console.log('[OCR] OCR.space parsed text:', parsed);
+            if (parsed) cloudText = parsed;
+          }
         } catch (err) { console.warn('OCR.space failed:', err); }
       }
 
