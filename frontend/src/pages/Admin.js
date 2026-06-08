@@ -89,6 +89,7 @@ export default function Admin() {
   const [scanDrawDate, setScanDrawDate]   = useState(new Date().toISOString().slice(0, 10));
   const [scanDrawTime, setScanDrawTime]   = useState('2PM');
   const [scanSubmitting, setScanSubmitting] = useState(false);
+  const [quickText, setQuickText]         = useState('');
   const scanFileRef                       = useRef(null);
 
   const pushAlert = (type, message) => {
@@ -1564,6 +1565,37 @@ export default function Admin() {
                 color: scanDrawTime === t ? '#fff' : '#64748b' }}
               onClick={() => setScanDrawTime(t)}>{t}</button>
           ))}
+        </div>
+
+        {/* ── Quick Text Entry ── */}
+        <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 12, padding: 14, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#166534', marginBottom: 6 }}>⌨️ Quick Text Entry</div>
+          <div style={{ fontSize: 12, color: '#15803d', marginBottom: 8 }}>
+            Type one bet per line: <b>number amount</b> &nbsp;e.g. <code>908 20</code> or <code>9-0-8 20</code>. Paste from WhatsApp/text.
+          </div>
+          <textarea
+            value={quickText}
+            onChange={e => setQuickText(e.target.value)}
+            placeholder={'908 20\n208 30\n145 10'}
+            rows={4}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #86efac', fontSize: 14, fontFamily: 'monospace', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }}
+          />
+          <button
+            style={{ ...S.btn, background: '#16a34a' }}
+            onClick={() => {
+              const bets = parseBetText(quickText);
+              if (bets.length === 0) return toast('No valid bets found. Format: number amount per line (e.g. 908 20)', { icon: '⚠️' });
+              setScanBets(prev => {
+                const existing = new Set(prev.map(b => `${b.numbers}:${b.amount}`));
+                const fresh = bets.filter(b => !existing.has(`${b.numbers}:${b.amount}`));
+                return [...prev, ...fresh];
+              });
+              setQuickText('');
+              toast.success(`${bets.length} bet(s) added — review before submitting.`);
+            }}
+          >
+            ✅ Parse &amp; Add to Table
+          </button>
         </div>
 
         {/* Upload / camera button */}
